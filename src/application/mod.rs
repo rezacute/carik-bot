@@ -4,6 +4,8 @@
 //! - Services: Business logic orchestration
 //! - Commands: CLI command handlers
 //! - Errors: Domain-specific errors
+//! - Messaging: Message parsing, middleware, dispatching
 
 pub mod errors;
 pub mod services;
+pub mod messaging;
