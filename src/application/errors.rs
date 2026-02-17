@@ -80,3 +80,28 @@ pub enum ConfigError {
     #[error("Parse error: {0}")]
     Parse(String),
 }
+
+/// Plugin errors
+#[derive(Error, Debug)]
+pub enum PluginError {
+    #[error("Failed to load plugin: {0}")]
+    Load(String),
+
+    #[error("Plugin not found: {0}")]
+    NotFound(String),
+
+    #[error("Failed to unload plugin: {0}")]
+    Unload(String),
+
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
+    #[error("Plugin error: {0}")]
+    Error(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+/// Result type for plugin operations
+pub type PluginResult<T> = Result<T, PluginError>;
