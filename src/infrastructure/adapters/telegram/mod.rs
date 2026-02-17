@@ -209,6 +209,49 @@ impl TelegramAdapter {
 
         Ok(data.result.message_id.to_string())
     }
+
+    /// Register bot commands with Telegram
+    pub async fn register_commands(&self) -> Result<(), BotError> {
+        #[derive(Serialize)]
+        struct Command {
+            command: String,
+            description: String,
+        }
+
+        #[derive(Serialize)]
+        struct SetMyCommandsRequest {
+            commands: Vec<Command>,
+        }
+
+        let commands = vec![
+            Command { command: "start".to_string(), description: "Start the bot".to_string() },
+            Command { command: "help".to_string(), description: "Show help message".to_string() },
+            Command { command: "version".to_string(), description: "Show bot version".to_string() },
+            Command { command: "workspace".to_string(), description: "Manage workspaces".to_string() },
+            Command { command: "code".to_string(), description: "Run coding task with kiro".to_string() },
+            Command { command: "ping".to_string(), description: "Check bot is alive".to_string() },
+            Command { command: "clear".to_string(), description: "Clear conversation".to_string() },
+            Command { command: "quote".to_string(), description: "Get random quote".to_string() },
+        ];
+
+        let url = self.api_url("setMyCommands");
+        let request = SetMyCommandsRequest { commands };
+
+        let response = self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| BotError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(BotError::Network(format!("Failed to register commands: {}", error)));
+        }
+
+        tracing::info!("Registered bot commands with Telegram");
+        Ok(())
+    }
 }
 
 #[async_trait]

@@ -80,6 +80,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     // Initialize command service
     let mut commands = CommandService::new(&config.bot.prefix);
     commands.register_defaults();
+    
+    // Register workspace command
+    register_workspace_command(&mut commands);
 
     // Select adapter
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -97,6 +100,12 @@ fn run_bot(config_path: String, token_override: Option<String>) {
         };
         rt.block_on(async {
             let mut bot = TelegramAdapter::new(token, allowed_users);
+            
+            // Register bot commands with Telegram
+            if let Err(e) = bot.register_commands().await {
+                tracing::warn!("Failed to register commands: {}", e);
+            }
+            
             run_telegram_bot(&mut bot, &mut commands).await;
         });
     } else {
@@ -274,18 +283,30 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
 }
 
 /// Generate Javanese-style greeting
-/// Execute kiro-cli as a coding agent
+/// Execute kiro-cli as a coding agent in the workspace directory
 async fn execute_kiro_cli(prompt: &str) -> String {
+    execute_kiro_cli_in_dir(prompt, &get_workspace_dir()).await
+}
+
+async fn execute_kiro_cli_in_dir(prompt: &str, dir: &std::path::Path) -> String {
     use tokio::process::Command;
     use std::io::Write;
     
-    tracing::info!("Executing kiro-cli with prompt: {}", prompt);
+    tracing::info!("Executing kiro-cli in {:?} with prompt: {}", dir, prompt);
+    
+    // Ensure workspace directory exists
+    if !dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return format!("Error: Could not create workspace directory: {}", e);
+        }
+    }
     
     let mut child = Command::new("/home/ubuntu/.local/bin/kiro-cli")
         .arg("chat")
         .arg("--no-interactive")
         .arg("--trust-all-tools")
         .arg(&prompt)
+        .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -346,6 +367,129 @@ fn strip_ansi_codes(s: &str) -> String {
         .map(|l| l.trim())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Workspace management
+const CARIK_HOME: &str = "/home/ubuntu/.carik-bot";
+
+fn register_workspace_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("workspace")
+        .with_description("Manage workspaces")
+        .with_usage("/workspace <list|create|delete|switch> [name]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            let args_str = args.join(" ");
+            let parts: Vec<&str> = args_str.split_whitespace().collect();
+            
+            let response = match parts.first().map(|s| *s) {
+                Some("list") | Some("ls") | None => list_workspaces(),
+                Some("create") | Some("new") => {
+                    if parts.len() < 2 {
+                        Ok("Usage: /workspace create <name>".to_string())
+                    } else {
+                        create_workspace(parts[1])
+                    }
+                }
+                Some("delete") | Some("rm") => {
+                    if parts.len() < 2 {
+                        Ok("Usage: /workspace delete <name>".to_string())
+                    } else {
+                        delete_workspace(parts[1])
+                    }
+                }
+                Some("switch") | Some("use") => {
+                    if parts.len() < 2 {
+                        Ok("Usage: /workspace switch <name>".to_string())
+                    } else {
+                        switch_workspace(parts[1])
+                    }
+                }
+                Some("current") | Some("info") => get_current_workspace(),
+                _ => Ok("Usage: /workspace <list|create|delete|switch|current> [name]".to_string())
+            };
+            
+            response.map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))
+        }));
+}
+
+fn list_workspaces() -> Result<String, String> {
+    let home = std::path::Path::new(CARIK_HOME);
+    if !home.exists() {
+        std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
+    }
+    
+    let mut output = "Workspaces:\n".to_string();
+    
+    for entry in std::fs::read_dir(home).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_dir() && path.file_name().map(|n| !n.to_string_lossy().starts_with('.')).unwrap_or(false) {
+            let name = path.file_name().unwrap().to_string_lossy();
+            output.push_str(&format!("  - {}\n", name));
+        }
+    }
+    
+    if output == "Workspaces:\n" {
+        output.push_str("  (none)\n");
+    }
+    
+    output.push_str("\nCurrent: default-workspace");
+    Ok(output)
+}
+
+fn create_workspace(name: &str) -> Result<String, String> {
+    // Validate name
+    if name.contains(|c: char| c.is_whitespace() || c == '/' || c == '.') {
+        return Ok("Invalid workspace name. Use alphanumeric and underscores only.".to_string());
+    }
+    
+    let workspace_path = std::path::Path::new(CARIK_HOME).join(name);
+    
+    if workspace_path.exists() {
+        return Ok(format!("Workspace '{}' already exists", name));
+    }
+    
+    std::fs::create_dir_all(&workspace_path).map_err(|e| e.to_string())?;
+    Ok(format!("Created workspace: {}", name))
+}
+
+fn delete_workspace(name: &str) -> Result<String, String> {
+    if name == "default-workspace" {
+        return Ok("Cannot delete default-workspace".to_string());
+    }
+    
+    let workspace_path = std::path::Path::new(CARIK_HOME).join(name);
+    
+    if !workspace_path.exists() {
+        return Ok(format!("Workspace '{}' does not exist", name));
+    }
+    
+    std::fs::remove_dir_all(&workspace_path).map_err(|e| e.to_string())?;
+    Ok(format!("Deleted workspace: {}", name))
+}
+
+fn switch_workspace(name: &str) -> Result<String, String> {
+    let workspace_path = std::path::Path::new(CARIK_HOME).join(name);
+    
+    if !workspace_path.exists() {
+        return Ok(format!("Workspace '{}' does not exist. Use /workspace create {} to create it.", name, name));
+    }
+    
+    // For now, just acknowledge the switch (in a full implementation, would persist this)
+    Ok(format!("Switched to workspace: {}", name))
+}
+
+fn get_current_workspace() -> Result<String, String> {
+    Ok("Current workspace: default-workspace".to_string())
+}
+
+fn get_workspace_dir() -> std::path::PathBuf {
+    std::path::Path::new(CARIK_HOME).join("default-workspace")
 }
 
 fn generate_javanese_greeting(bot_username: &str) -> String {
