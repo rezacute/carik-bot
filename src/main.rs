@@ -172,17 +172,39 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                             
                             // Process command or message
                             let response = if text.starts_with(&commands.prefix()) || text.starts_with('/') {
-                                let cmd_name = text.trim_start_matches(&commands.prefix())
-                                    .trim_start_matches('/')
-                                    .split_whitespace()
-                                    .next()
-                                    .unwrap_or("");
-                                
-                                let msg = Message::from_command(&chat_id, cmd_name, vec![]);
-                                match commands.handle(&msg) {
-                                    Ok(Some(response)) => response,
-                                    Ok(None) => continue,
-                                    Err(e) => format!("Error: {}", e),
+                                // Check for /code command (coding agent)
+                                let trimmed = text.trim_start_matches(&commands.prefix()).trim_start_matches('/');
+                                if trimmed.starts_with("code") {
+                                    // Extract the prompt from /code command
+                                    let prompt = if trimmed.starts_with("code ") {
+                                        // Has space after "code", grab everything after position 5
+                                        trimmed[5..].trim().to_string()
+                                    } else if trimmed.len() > 5 {
+                                        // Has content after "code" (no space) - grab from position 4
+                                        trimmed[4..].trim().to_string()
+                                    } else {
+                                        // Just "code" or "/code" with nothing after
+                                        String::new()
+                                    };
+                                    
+                                    if prompt.is_empty() {
+                                        "Usage: /code <your coding task>\nExample: /code write a hello world in python".to_string()
+                                    } else {
+                                        // Execute kiro-cli as coding agent
+                                        execute_kiro_cli(&prompt).await
+                                    }
+                                } else {
+                                    let cmd_name = trimmed
+                                        .split_whitespace()
+                                        .next()
+                                        .unwrap_or("");
+                                    
+                                    let msg = Message::from_command(&chat_id, cmd_name, vec![]);
+                                    match commands.handle(&msg) {
+                                        Ok(Some(response)) => response,
+                                        Ok(None) => continue,
+                                        Err(e) => format!("Error: {}", e),
+                                    }
                                 }
                             } else if let Some(ref llm) = llm {
                                 // Use LLM for conversation
@@ -223,7 +245,10 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                             };
 
                             // Send response
-                            let _ = bot.send_message(&chat_id, &response).await;
+                            tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
+                            if let Err(e) = bot.send_message(&chat_id, &response).await {
+                                tracing::error!("Failed to send message: {}", e);
+                            }
                         }
                     }
                     
@@ -249,6 +274,80 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
 }
 
 /// Generate Javanese-style greeting
+/// Execute kiro-cli as a coding agent
+async fn execute_kiro_cli(prompt: &str) -> String {
+    use tokio::process::Command;
+    use std::io::Write;
+    
+    tracing::info!("Executing kiro-cli with prompt: {}", prompt);
+    
+    let mut child = Command::new("/home/ubuntu/.local/bin/kiro-cli")
+        .arg("chat")
+        .arg("--no-interactive")
+        .arg("--trust-all-tools")
+        .arg(&prompt)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn kiro-cli");
+    
+    let output = child.wait_with_output().await.expect("Failed to wait for kiro-cli");
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    // Combine and strip ANSI codes
+    let mut combined = stdout.to_string();
+    if !stderr.is_empty() {
+        combined.push_str("\nStderr: ");
+        combined.push_str(&stderr);
+    }
+    
+    // Strip ANSI escape codes
+    let cleaned = strip_ansi_codes(&combined);
+    
+    // Limit response length for Telegram
+    let max_len = 4000;
+    if cleaned.len() > max_len {
+        format!("{}...\n\n(Output truncated, {} chars total)", &cleaned[..max_len], cleaned.len())
+    } else if cleaned.trim().is_empty() {
+        "No output from kiro-cli".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Strip ANSI escape codes from string
+fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip the escape sequence
+            if chars.next() == Some('[') {
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_alphabetic() {
+                        chars.next();
+                        break;
+                    } else {
+                        chars.next();
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    
+    // Clean up extra whitespace
+    let cleaned = result.trim().to_string();
+    cleaned.lines()
+        .map(|l| l.trim())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn generate_javanese_greeting(bot_username: &str) -> String {
     format!("Sugeng rawuh Pak Lurah Ing {}\n\nKulo niku Carik AI Assistant.\nNyuwun sewu, kepareng nepangaken.\nPanjenenganipun inggih punika tamu ing wewaton iki.\nMonggo kerso dipunbotenaken. Sendiko dawuh!\n\n/help - Pitulungan\n/about - Nepangaken Carik\n/ping - Mriki Piyambak\n/clear - Ngresikaken Obrolan\n/quote - UnggahQuote", bot_username)
 }
