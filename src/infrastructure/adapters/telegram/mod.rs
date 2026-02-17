@@ -180,11 +180,17 @@ impl TelegramAdapter {
         text.to_string()
     }
 
-    /// Send a message via Telegram API - always use MarkdownV2
+    /// Send a message via Telegram API - try MarkdownV2, fallback to plain
     pub async fn send_message_api(&self, chat_id: &str, text: &str) -> Result<String, BotError> {
-        let escaped = Self::escape_markdown(text);
-        tracing::info!("Sending with MarkdownV2: {}", &escaped[..escaped.len().min(30)]);
-        self.send_message_with_format(chat_id, &escaped, Some("MarkdownV2")).await
+        // Try with MarkdownV2 first
+        match self.send_message_with_format(chat_id, text, Some("MarkdownV2")).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // Fallback to plain text
+                tracing::warn!("Markdown failed, using plain text: {}", e);
+                self.send_message_with_format(chat_id, text, None).await
+            }
+        }
     }
 
     /// Send a message with specific parse mode
@@ -293,6 +299,9 @@ impl Bot for TelegramAdapter {
             return Err(BotError::Unauthorized("User not in whitelist".to_string()));
         }
         
+        // Send typing action first
+        let _ = self.send_chat_action(chat_id, "typing").await;
+        
         match self.send_message_api(chat_id, text).await {
             Ok(msg_id) => Ok(msg_id),
             Err(e) => {
@@ -397,5 +406,35 @@ impl Bot for TelegramAdapter {
 
     fn bot_info(&self) -> BotInfo {
         self.info.clone()
+    }
+}
+
+impl TelegramAdapter {
+    /// Send chat action (typing, upload_photo, etc.)
+    pub async fn send_chat_action(&self, chat_id: &str, action: &str) -> Result<(), BotError> {
+        #[derive(Serialize)]
+        struct SendChatActionRequest {
+            chat_id: String,
+            action: String,
+        }
+        
+        let url = self.api_url("sendChatAction");
+        let request = SendChatActionRequest {
+            chat_id: chat_id.to_string(),
+            action: action.to_string(),
+        };
+        
+        let response = self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| BotError::Network(e.to_string()))?;
+        
+        if !response.status().is_success() {
+            return Err(BotError::Network(format!("Chat action error: {}", response.status())));
+        }
+        
+        Ok(())
     }
 }
