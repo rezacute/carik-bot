@@ -1,6 +1,10 @@
 # carik-bot
 
-A minimal, secure bot framework with clean architecture — inspired by OpenClaw but streamlined.
+> **carik** (Javanese: ꦕꦫꦶꦏ) — A faithful Javanese butler for your digital life.
+
+**carik** (pronounced "cha-reek") is a bot framework named after the Javanese word for a trusted household servant — someone who anticipates needs, handles tasks quietly, and serves with discretion.
+
+Just as a **lurah** (village head) in Javanese culture relies on their trusted carik to manage household affairs, carik-bot serves as your reliable digital assistant.
 
 ## Features
 
@@ -150,8 +154,8 @@ Built-in commands:
 
 - ✅ Phase 1: Clean Architecture
 - ✅ Phase 2: Plugin System
-- 🔄 Phase 3: Message Handling + Middleware
-- ⏳ Phase 4: Platform Adapters
+- ✅ Phase 3: Message Handling + Middleware
+- 🔄 Phase 4: Platform Adapters
 - ⏳ Phase 5: Security Hardening
 - ⏳ Phase 6: CI/CD + Docker
 - ⏳ Phase 7: Release v1.0.0
