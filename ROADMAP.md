@@ -130,10 +130,22 @@ infrastructure/
 **Security Features:**
 - [ ] Secrets management (no plain text tokens)
 - [ ] Input sanitization (XSS, injection)
-- [ ] Rate limiting per user/chat
-- [ ] Audit logging
+- [x] Rate limiting per user/chat
+- [x] Audit logging
+- [x] User Whitelist - Restrict bot access to specific Telegram users
 - [ ] TLS/HTTPS for webhooks
 - [ ] Plugin sandboxing (firejail or similar)
+
+**User Whitelist Configuration:**
+```yaml
+whitelist:
+  enabled: true
+  users:
+    - "6504720757"  # Your Telegram user ID
+    - "1234567890"  # Additional allowed users
+```
+
+When enabled, only users in the whitelist can interact with the bot. Unauthorized users receive an error message.
 
 **Security Config:**
 ```yaml

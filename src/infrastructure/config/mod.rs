@@ -12,6 +12,7 @@ pub struct Config {
     pub plugins: PluginConfig,
     pub security: SecurityConfig,
     pub adapters: AdaptersConfig,
+    pub whitelist: WhitelistConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -55,6 +56,14 @@ pub struct SandboxConfig {
 pub struct AuditConfig {
     pub enabled: bool,
     pub path: Option<PathBuf>,
+}
+
+/// Whitelist configuration for user access control
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct WhitelistConfig {
+    pub enabled: bool,
+    pub users: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -111,6 +120,10 @@ impl Default for Config {
                     enabled: true,
                 }),
             },
+            whitelist: WhitelistConfig {
+                enabled: true,
+                users: vec!["6504720757".to_string()],
+            },
         }
     }
 }
@@ -123,6 +136,14 @@ impl Config {
 
         serde_yaml::from_str(&content)
             .map_err(|e| ConfigError::Parse(format!("Failed to parse config: {}", e)))
+    }
+
+    /// Check if a user ID is whitelisted
+    pub fn is_user_whitelisted(&self, user_id: &str) -> bool {
+        if !self.whitelist.enabled {
+            return true; // Whitelist disabled, allow all
+        }
+        self.whitelist.users.contains(&user_id.to_string())
     }
 
     pub fn load_env() -> Self {

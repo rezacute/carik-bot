@@ -11,15 +11,52 @@ use crate::application::errors::BotError;
 /// Telegram API base URL
 const API_BASE: &str = "https://api.telegram.org";
 
+/// Telegram update type
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Update {
+    pub update_id: i64,
+    pub message: Option<Message>,
+    pub callback_query: Option<CallbackQuery>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Message {
+    pub message_id: i64,
+    pub from: Option<User>,
+    pub chat: Chat,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct User {
+    pub id: i64,
+    pub username: Option<String>,
+    pub first_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Chat {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CallbackQuery {
+    pub id: String,
+    pub from: User,
+    pub message: Option<Message>,
+    pub data: Option<String>,
+}
+
 /// Telegram bot adapter
 pub struct TelegramAdapter {
     token: String,
     client: Client,
     info: BotInfo,
+    allowed_user_ids: Vec<String>,
 }
 
 impl TelegramAdapter {
-    pub fn new(token: impl Into<String>) -> Self {
+    pub fn new(token: impl Into<String>, allowed_user_ids: Option<Vec<String>>) -> Self {
         let token = token.into();
         Self {
             token: token.clone(),
@@ -29,6 +66,16 @@ impl TelegramAdapter {
                 name: "carik-bot".to_string(),
                 username: "carik_bot".to_string(),
             },
+            allowed_user_ids: allowed_user_ids.unwrap_or_default(),
+        }
+    }
+
+    /// Check if user is whitelisted
+    fn is_user_allowed(&self, user_id: &str) -> bool {
+        if self.allowed_user_ids.is_empty() {
+            true // No whitelist configured, allow all
+        } else {
+            self.allowed_user_ids.contains(&user_id.to_string())
         }
     }
 
@@ -70,6 +117,54 @@ impl TelegramAdapter {
         };
 
         Ok(())
+    }
+
+    /// Get updates from Telegram using getUpdates API
+    pub async fn get_updates(&self, offset: i64, timeout: i64) -> Result<Vec<Update>, BotError> {
+        #[derive(Serialize)]
+        struct GetUpdatesRequest {
+            offset: i64,
+            timeout: i64,
+            allowed_updates: Vec<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct Response {
+            result: Vec<Update>,
+        }
+
+        let url = self.api_url("getUpdates");
+        let request = GetUpdatesRequest {
+            offset,
+            timeout,
+            allowed_updates: vec!["message".to_string(), "callback_query".to_string()],
+        };
+
+        let response = self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| BotError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(BotError::Network(format!("Telegram API error: {}", response.status())));
+        }
+
+        let data: Response = response
+            .json()
+            .await
+            .map_err(|e| BotError::Parse(e.to_string()))?;
+
+        Ok(data.result)
+    }
+
+    /// Get the next update offset
+    pub fn get_next_offset(updates: &[Update]) -> i64 {
+        updates.iter()
+            .map(|u| u.update_id + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Send a message via Telegram API
@@ -125,6 +220,12 @@ impl Bot for TelegramAdapter {
 
     async fn send_message(&self, chat_id: &str, text: &str) -> Result<String, BotError> {
         tracing::debug!("Sending to {}: {}", chat_id, text);
+        
+        // Check whitelist if configured
+        if !self.allowed_user_ids.is_empty() && !self.is_user_allowed(chat_id) {
+            tracing::warn!("Unauthorized user attempted to send message: {}", chat_id);
+            return Err(BotError::Unauthorized("User not in whitelist".to_string()));
+        }
         
         match self.send_message_api(chat_id, text).await {
             Ok(msg_id) => Ok(msg_id),

@@ -3,6 +3,10 @@ name = "carik-bot"
 version = "0.1.0"
 edition = "2021"
 
+[dev-dependencies]
+# For testing
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive"] }
