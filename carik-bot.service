@@ -1,0 +1,15 @@
+[Unit]
+Description=Carik Bot - AI Telegram Assistant
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/.openclaw/workspace/carik-bot
+ExecStart=/home/ubuntu/.openclaw/workspace/carik-bot/target/release/carik-bot run
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/.openclaw/workspace/carik-bot/.env
+
+[Install]
+WantedBy=multi-user.target

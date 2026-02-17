@@ -1,3 +1,5 @@
+<img src="carik_logo.jpg" alt="carik-bot logo" width="200" align="left" style="margin-right: 20px; margin-bottom: 20px;">
+
 # carik-bot
 
 > **carik** (Javanese: ꦕꦫꦶꦏ) — A faithful Javanese butler for your digital life.
@@ -6,93 +8,117 @@
 
 Just as a **lurah** (village head) in Javanese culture relies on their trusted carik to manage household affairs, carik-bot serves as your reliable digital assistant.
 
+---
+
 ## Features
 
-- **Clean Architecture** — Domain, Application, Infrastructure layers
-- **Plugin System** — Hot-loadable plugins with permissions
-- **Multiple Adapters** — Telegram, Console (dev mode)
-- **Config Management** — YAML + environment variables
-- **Error Handling** — Structured error types with `thiserror`
-- **Logging** — `tracing` for structured logging
-
-## Architecture
-
-```
-src/
-├── domain/              # Core business logic (no external deps)
-│   ├── entities/       # User, Message, Command
-│   └── traits/         # Bot, Store abstractions
-├── application/        # Use cases
-│   ├── errors.rs      # Domain errors (BotError, CommandError, etc.)
-│   └── services/      # CommandService, MessageService
-├── infrastructure/     # External concerns
-│   ├── config/        # YAML + env config
-│   ├── storage/       # JSON file store
-│   ├── adapters/      # Telegram, Console
-│   └── plugins/       # Plugin system
-└── presentation/
-    └── main.rs        # CLI entry
-```
+- 🤖 **Telegram Integration** — Full Telegram Bot API support with webhook and long polling
+- 🧠 **LLM Integration** — Groq-powered AI responses with conversation memory
+- 🎯 **Command System** — Prefix-based commands with help auto-generation
+- 🔌 **Plugin Architecture** — Hot-loadable plugins with permission system
+- 🏗️ **Clean Architecture** — Domain, Application, Infrastructure layers
+- 🔐 **Security Hardened** — systemd security options, non-root execution
+- 📝 **Structured Logging** — tracing-based logging to journald
+- ⚙️ **Config Management** — YAML + environment variables
 
 ## Quick Start
 
+### Prerequisites
+
+- Rust 1.70+
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Optional: Groq API Key (for AI features)
+
+### Build & Run
+
 ```bash
-# Build
+# Clone and build
+git clone https://github.com/yourusername/carik-bot.git
+cd carik-bot
 cargo build --release
+
+# Configure
+cp .env.example .env
+# Edit .env with your BOT_TOKEN and GROQ_API_KEY
 
 # Run in console mode (dev)
 cargo run
 
-# Run with Telegram token
-BOT_TOKEN=your_token cargo run
-
-# Show version
-cargo run -- version
-
-# Generate default config
-cargo run -- init-config
+# Run with Telegram
+./target/release/carik-bot run
 ```
+
+### systemd Deployment
+
+```bash
+# Install as systemd service (auto-start on boot)
+sudo ./scripts/install-systemd.sh
+
+# Check status
+systemctl status carik-bot
+
+# View logs
+journalctl -u carik-bot -f
+```
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment notes.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help message |
+| `/about` | About carik-bot |
+| `/ping` | Pong! |
+| `/clear` | Clear conversation history |
+| `/quote` | Get a random quote |
 
 ## Configuration
 
-Create `config.yaml`:
+### Environment Variables
+
+```bash
+BOT_TOKEN=your_telegram_bot_token_here
+GROQ_API_KEY=your_groq_api_key_here  # Optional, for AI features
+```
+
+### config.yaml
 
 ```yaml
 bot:
   name: carik-bot
   prefix: "!"
 
-plugins:
-  directory: ./plugins
-  auto_load: true
-
-security:
-  rate_limit:
-    max_requests: 20
-    window_seconds: 60
-  sandbox:
-    enabled: true
-
-adapters:
-  telegram:
-    enabled: true
-    token: ${BOT_TOKEN}
+whitelist:
+  enabled: false  # Set true to only allow specific users
+  users:
+    - "123456789"
 ```
 
-Or use environment variables:
-- `BOT_TOKEN` — Telegram bot token
-- `BOT_PREFIX` — Command prefix (default: `/`)
+## Architecture
 
-## Plugin System
+```
+src/
+├── domain/              # Core business logic (no external deps)
+│   └── entities/       # Message, Command, User
+├── application/        # Use cases
+│   ├── errors.rs      # Domain errors
+│   └── services/      # CommandService
+├── infrastructure/     # External concerns
+│   ├── config/         # YAML + env config
+│   ├── adapters/       # Telegram, Console
+│   └── llm/           # Groq LLM provider
+└── main.rs             # CLI entry point
+```
+
+## Plugins
 
 Plugins are dynamically loaded from the `plugins/` directory.
-
-### Plugin Structure
 
 ```
 plugins/hello/
 ├── plugin.toml    # Required manifest
-└── libhello.so   # Compiled plugin (optional if using default naming)
+└── libhello.so   # Compiled plugin
 ```
 
 ### plugin.toml
@@ -106,71 +132,29 @@ permissions:
   - send-messages
 ```
 
-### Available Permissions
+## Tech Stack
 
-- `read-messages` — Read incoming messages
-- `send-messages` — Send messages
-- `manage-commands` — Register bot commands
-- `filesystem` — Access file system
-- `http` — Make HTTP requests
-- `env-vars` — Access environment variables
-- `load-plugins` — Load other plugins
+| Component | Technology |
+|-----------|------------|
+| Language | Rust 1.70+ |
+| Async | Tokio |
+| Telegram | reqwest + serde |
+| LLM | Groq API |
+| Config | serde_yaml |
+| Logging | tracing + journald |
+| CLI | clap |
 
-### Writing a Plugin
+## Contributing
 
-```rust
-use carik_bot::plugins::Plugin;
-
-struct HelloPlugin;
-
-impl Plugin for HelloPlugin {
-    fn init(&self) -> carik_bot::PluginResult<()> {
-        tracing::info!("Hello plugin initialized!");
-        Ok(())
-    }
-    
-    fn name(&self) -> &str { "hello" }
-    fn version(&self) -> &str { "0.1.0" }
-    fn description(&self) -> Option<&str> { Some("A hello world plugin") }
-    
-    fn shutdown(&self) -> carik_bot::PluginResult<()> {
-        Ok(())
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn carik_plugin_init() -> *mut dyn Plugin {
-    Box::into_raw(Box::new(HelloPlugin))
-}
-```
-
-## Commands
-
-Built-in commands:
-- `/help` — Show help message
-- `/version` — Show bot version
-
-## Roadmap to v1
-
-- ✅ Phase 1: Clean Architecture
-- ✅ Phase 2: Plugin System
-- ✅ Phase 3: Message Handling + Middleware
-- 🔄 Phase 4: Platform Adapters + LLM Integration
-- ⏳ Phase 5: Security Hardening
-- ⏳ Phase 6: CI/CD + Docker
-- ⏳ Phase 7: Release v1.0.0
-
-See [ROADMAP.md](./ROADMAP.md) for details.
-
-## Dependencies
-
-- `clap` — CLI argument parsing
-- `tokio` — Async runtime
-- `serde` / `serde_yaml` — Serialization
-- `thiserror` — Error handling
-- `tracing` — Logging
-- `libloading` — Dynamic library loading
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a PR
 
 ## License
 
 MIT
+
+---
+
+**carik-bot** — Your faithful digital servant.
