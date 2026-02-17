@@ -1,0 +1,19 @@
+bot:
+  name: carik-bot
+  prefix: "!"
+
+plugins:
+  directory: ./plugins
+  auto_load: false
+
+security:
+  rate_limit:
+    max_requests: 20
+    window_seconds: 60
+  sandbox:
+    enabled: false
+
+adapters:
+  telegram:
+    enabled: true
+    token: ${BOT_TOKEN}
