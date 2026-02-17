@@ -267,3 +267,60 @@ async-trait = "0.1"
 3. **Define entities** — What does the bot manipulate?
 
 Let me know when ready to start! 🚀
+
+---
+
+## Phase 5.5: Skills & OpenClaw Compatibility (Week 6.5)
+**Goal:** Add skill system compatible with OpenClaw format
+
+**Skills Structure:**
+```
+skills/
+├── help/         # Help and skill management
+├── weather/      # Weather queries (wttr.in)
+├── github/      # Git operations
+├── quotes/      # Inspirational quotes
+└── ...
+    └── SKILL.md  # OpenClaw-compatible skill definition
+```
+
+**Skill Format (OpenClaw-compatible):**
+```yaml
+---
+name: carik-skill-name
+description: Brief description of the skill
+metadata:
+  {
+    "carik": { "emoji": "🔧", "requires": {} },
+    "openclaw": { "emoji": "🔧", "requires": { "bins": ["curl"] } }
+  }
+---
+
+# Skill Name
+
+Description and usage examples.
+
+## Usage
+
+```
+User: /command
+Carik: Response
+```
+```
+
+**Features:**
+- [x] Skill directory structure
+- [x] YAML frontmatter metadata
+- [x] OpenClaw-compatible format
+- [x] Emoji support
+- [x] Requirements specification
+- [x] Help skill
+- [x] Weather skill
+- [x] GitHub skill
+- [x] Quotes skill
+
+**OpenClaw Compatibility:**
+- Same `SKILL.md` format
+- YAML frontmatter with metadata
+- Usage examples in code blocks
+- Cross-referenced emoji support
