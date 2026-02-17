@@ -74,14 +74,10 @@ src/
 
 ---
 
-### Phase 4: Platform Adapters (Week 5)
-**Goal:** Support multiple messaging platforms
+### Phase 4: Platform Adapters + LLM Integration (Week 5)
+**Goal:** Support multiple messaging platforms and AI brain
 
-**Adapters (MVP):**
-- [ ] Telegram bot API
-- [ ] Console/CLI (dev mode)
-
-**Architecture:**
+**Platform Adapters:**
 ```
 infrastructure/
 └── adapters/
@@ -90,10 +86,41 @@ infrastructure/
     └── console/
 ```
 
+**LLM Integration:**
+- Unified LLM trait for multi-provider support
+- Built-in providers:
+  - [ ] **MiniMax** — Chinese AI (default)
+  - [ ] **Claude** — Anthropic
+  - [ ] **Groq** — Fast inference
+
+**LLM Architecture:**
+```
+infrastructure/
+└── llm/
+    ├── traits.rs      # LLM trait
+    ├── config.rs      # Provider config
+    └── providers/
+        ├── minimax.rs
+        ├── claude.rs
+        └── groq.rs
+```
+
+**Features:**
+- Streaming responses
+- Conversation context/memory
+- System prompt configuration
+- Token usage tracking
+- Fallback providers
+
 **Deliverables:**
 - [ ] Telegram adapter
 - [ ] Adapter trait
 - [ ] Platform-agnostic message conversion
+- [ ] LLM trait with unified API
+- [ ] MiniMax provider
+- [ ] Claude provider
+- [ ] Groq provider
+- [ ] Chat memory management
 
 ---
 
