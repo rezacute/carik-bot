@@ -5,8 +5,10 @@
 //! - Storage: Data persistence
 //! - Adapters: Platform integrations (Telegram, Discord, etc.)
 //! - Plugins: Plugin system
+//! - LLM: AI integration
 
 pub mod config;
 pub mod storage;
 pub mod adapters;
 pub mod plugins;
+pub mod llm;
