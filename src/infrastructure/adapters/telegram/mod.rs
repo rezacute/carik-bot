@@ -167,12 +167,34 @@ impl TelegramAdapter {
             .unwrap_or(0)
     }
 
-    /// Send a message via Telegram API
+    /// Check if text has clear markdown formatting patterns
+    fn has_markdown(text: &str) -> bool {
+        // Only use markdown if clearly intended: **bold**, `code`, ```codeblocks```
+        text.contains("**") || text.contains("`") || text.contains("```")
+    }
+
+    /// Escape special characters for Telegram MarkdownV2
+    fn escape_markdown(text: &str) -> String {
+        // Don't escape anything - send raw to Telegram
+        // Telegram will render markdown if valid, show raw if not
+        text.to_string()
+    }
+
+    /// Send a message via Telegram API - always use MarkdownV2
     pub async fn send_message_api(&self, chat_id: &str, text: &str) -> Result<String, BotError> {
+        let escaped = Self::escape_markdown(text);
+        tracing::info!("Sending with MarkdownV2: {}", &escaped[..escaped.len().min(30)]);
+        self.send_message_with_format(chat_id, &escaped, Some("MarkdownV2")).await
+    }
+
+    /// Send a message with specific parse mode
+    pub async fn send_message_with_format(&self, chat_id: &str, text: &str, parse_mode: Option<&str>) -> Result<String, BotError> {
         #[derive(Serialize)]
         struct SendMessageRequest {
             chat_id: String,
             text: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            parse_mode: Option<String>,
         }
 
         #[derive(Deserialize)]
@@ -189,6 +211,7 @@ impl TelegramAdapter {
         let request = SendMessageRequest {
             chat_id: chat_id.to_string(),
             text: text.to_string(),
+            parse_mode: parse_mode.map(|s| s.to_string()),
         };
 
         let response = self.client

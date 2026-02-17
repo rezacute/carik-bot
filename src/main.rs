@@ -81,6 +81,14 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     let mut commands = CommandService::new(&config.bot.prefix);
     commands.register_defaults();
     
+    // Register test markdown command
+    use crate::domain::entities::Command;
+    commands.register(Command::new("testmd")
+        .with_description("Test markdown rendering")
+        .with_handler(|_| {
+            Ok("*bold* _italic_ `code`\n\n**bold2** __italic2__".to_string())
+        }));
+    
     // Register workspace command
     register_workspace_command(&mut commands);
 
