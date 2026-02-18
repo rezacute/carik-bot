@@ -229,13 +229,13 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                             }
                             
                             // Process command or message
-                            let response = if text.starts_with(&commands.prefix()) || text.starts_with('/') {
+                            if text.starts_with(&commands.prefix()) || text.starts_with('/') {
                                 // Check for /code command (coding agent)
                                 let trimmed = text.trim_start_matches(&commands.prefix()).trim_start_matches('/');
                                 if trimmed.starts_with("code") {
                                     // Check guest access first
                                     let chat_id_str = chat_id.to_string();
-                                    match can_use_privileged(&chat_id_str) {
+                                    let response = match can_use_privileged(&chat_id_str) {
                                         Ok(false) => {
                                             "❌ Access denied.\n\nUse /connect to request one-time guest access,\nor ask the owner to add you.".to_string()
                                         }
@@ -260,6 +260,11 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                                 execute_kiro_cli(&prompt).await
                                             }
                                         }
+                                    };
+                                    
+                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
+                                    if let Err(e) = bot.send_message(&chat_id, &response).await {
+                                        tracing::error!("Failed to send message: {}", e);
                                     }
                                 } else {
                                     let cmd_parts: Vec<&str> = trimmed.split_whitespace().collect();
@@ -267,54 +272,35 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                     let args: Vec<String> = cmd_parts[1..].iter().map(|s| s.to_string()).collect();
                                     
                                     let msg = Message::from_command(&chat_id, cmd_name, args);
-                                    match commands.handle(&msg) {
+                                    let response = match commands.handle(&msg) {
                                         Ok(Some(response)) => response,
                                         Ok(None) => continue,
                                         Err(e) => format!("Error: {}", e),
-                                    }
-                                }
-                            } else if let Some(ref llm) = llm {
-                                // Use LLM for conversation
-                                let chat_history = conversations.entry(chat_id.clone()).or_insert_with(Vec::new);
-                                
-                                // Add user message to history
-                                chat_history.push(LLMMessage::user(&text));
-                                
-                                // Build messages with system prompt
-                                let mut messages = vec![LLMMessage::system(&system_prompt)];
-                                messages.extend(chat_history.clone());
-                                
-                                // Get LLM response
-                                match llm.chat(messages, None, Some(0.7), None).await {
-                                    Ok(response) => {
-                                        chat_history.push(LLMMessage::assistant(&response.content));
-                                        
-                                        // Limit history to last 10 messages
-                                        if chat_history.len() > 10 {
-                                            chat_history.remove(0);
-                                        }
-                                        
-                                        // Add Javanese greeting on first message
-                                        if is_first {
-                                            let greeting = generate_javanese_greeting(&info.username);
-                                            format!("{}\n\n{}", greeting, response.content)
-                                        } else {
-                                            response.content
-                                        }
-                                    }
-                                    Err(e) => {
-                                        format!("LLM Error: {}", e)
+                                    };
+                                    
+                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
+                                    if let Err(e) = bot.send_message(&chat_id, &response).await {
+                                        tracing::error!("Failed to send message: {}", e);
                                     }
                                 }
                             } else {
-                                // Echo mode when LLM is not available
-                                format!("Echo: {}", text)
-                            };
-
-                            // Send response
-                            tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
-                            if let Err(e) = bot.send_message(&chat_id, &response).await {
-                                tracing::error!("Failed to send message: {}", e);
+                                // Auto-route: detect intent and route to appropriate handler
+                                match route_message(&text, &llm, &system_prompt).await {
+                                    Some(resp) => {
+                                        // Send response
+                                        tracing::info!("Sending response to chat_id {}: {}", chat_id, &resp[..resp.len().min(100)]);
+                                        if let Err(e) = bot.send_message(&chat_id, &resp).await {
+                                            tracing::error!("Failed to send message: {}", e);
+                                        }
+                                    }
+                                    None => {
+                                        // Echo mode when LLM is not available
+                                        let echo = format!("Echo: {}", text);
+                                        if let Err(e) = bot.send_message(&chat_id, &echo).await {
+                                            tracing::error!("Failed to send message: {}", e);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -688,6 +674,71 @@ fn get_workspace_dir() -> std::path::PathBuf {
 
 fn get_docker_workspace_dir() -> String {
     "/workspace/default-workspace".to_string()
+}
+
+/// Detect if user message is a coding task
+fn is_coding_intent(text: &str) -> bool {
+    let coding_keywords = [
+        "code", "write", "create", "build", "make", "debug", "fix", 
+        "program", "script", "function", "class", "algorithm",
+        "implement", "develop", "refactor", "optimize",
+        "python", "javascript", "rust", "java", "golang", "typescript",
+        "app", "application", "website", "web", "api", "database",
+    ];
+    
+    let lower = text.to_lowercase();
+    coding_keywords.iter().any(|kw| lower.contains(kw))
+}
+
+/// Detect if user message is asking for a skill/tool
+fn detect_skill(text: &str) -> Option<String> {
+    let skill_keywords = [
+        ("weather", &["weather", "cuaca"]),
+        ("github", &["github", "git"]),
+        ("spotify", &["spotify", "music"]),
+        ("weather", &["weather", "forecast"]),
+        ("obsidian", &["obsidian", "note"]),
+    ];
+    
+    let lower = text.to_lowercase();
+    for (skill, keywords) in skill_keywords {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            return Some(skill.to_string());
+        }
+    }
+    None
+}
+
+/// Route message to appropriate handler
+async fn route_message(text: &str, llm: &Option<GroqProvider>, system_prompt: &str) -> Option<String> {
+    // Check for coding intent
+    if is_coding_intent(text) {
+        tracing::info!("Detected coding intent, routing to Kiro");
+        let response = execute_kiro_cli(text).await;
+        return Some(response);
+    }
+    
+    // Check for skill intent
+    if let Some(skill) = detect_skill(text) {
+        tracing::info!("Detected skill: {}", skill);
+        // TODO: Load skill.md and execute
+        return Some(format!("Skill '{}' detected. Skill execution coming soon!", skill));
+    }
+    
+    // Route to LLM
+    if let Some(ref llm) = llm {
+        tracing::info!("Routing to LLM");
+        let messages = vec![
+            LLMMessage::system(system_prompt),
+            LLMMessage::user(text),
+        ];
+        match llm.chat(messages, None, Some(0.7), None).await {
+            Ok(response) => return Some(response.content),
+            Err(e) => return Some(format!("LLM Error: {}", e)),
+        }
+    }
+    
+    None
 }
 
 /// Kiro CLI tmux session management
