@@ -716,7 +716,7 @@ fn register_kiro_command(commands: &mut CommandService) {
             }
             
             if args.is_empty() {
-                return Ok("Usage: /kiro <prompt>\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session".to_string());
+                return Ok("Usage: /kiro <prompt>\n\nSubcommands:\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session\n/kiro-new - Start new conversation\n/kiro-resume - Resume last conversation\n/kiro-ls - List workspace files\n/kiro-read <file> - Read file\n/kiro-write <file> <content> - Write file".to_string());
             }
             
             // Join all args as the prompt
@@ -755,6 +755,148 @@ fn register_kiro_command(commands: &mut CommandService) {
                 _ => {}
             }
             kiro_kill().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))
+        }));
+    
+    // kiro new - start fresh conversation
+    commands.register(Command::new("kiro-new")
+        .with_description("Start new kiro conversation")
+        .with_handler(|msg| {
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            // Kill existing and start new
+            let _ = std::process::Command::new("docker")
+                .args(["kill", "kiro-persistent"])
+                .output();
+            let _ = std::process::Command::new("docker")
+                .args(["rm", "kiro-persistent"])
+                .output();
+            
+            // Recreate container - inherit env from host
+            let cmd = r#"docker run -d --name kiro-persistent \
+                -v /home/ubuntu/.kiro:/root/.kiro \
+                -v /home/ubuntu/.local/share/kiro-cli:/root/.local/share/kiro-cli \
+                -v /home/ubuntu/.carik-bot:/workspace \
+                -v /home/ubuntu/.local/bin/kiro-cli:/usr/local/bin/kiro-cli \
+                -v /home/ubuntu/.aws:/root/.aws \
+                -e PATH="/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+                --env-file /home/ubuntu/.aws/credentials \
+                --workdir /workspace \
+                ubuntu:latest sleep infinity"#;
+            
+            let output = std::process::Command::new("bash")
+                .args(["-c", cmd])
+                .output();
+            
+            let success = output.as_ref().map(|o| o.status.success()).unwrap_or(false);
+            if success {
+                Ok("🔄 Started new Kiro session!".to_string())
+            } else {
+                Ok("❌ Failed to start new session.".to_string())
+            }
+        }));
+    
+    // kiro ls - list workspace files
+    commands.register(Command::new("kiro-ls")
+        .with_description("List workspace files")
+        .with_handler(|msg| {
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            let output = std::process::Command::new("docker")
+                .args(["exec", "kiro-persistent", "ls", "-la", "/workspace/default-workspace"])
+                .output();
+            
+            match output {
+                Ok(o) if o.status.success() => {
+                    let files = String::from_utf8_lossy(&o.stdout);
+                    Ok(format!("📁 Workspace files:\n```\n{}```", files))
+                }
+                _ => Ok("❌ Kiro not running. Use /kiro first.".to_string())
+            }
+        }));
+    
+    // kiro read - read file from workspace
+    commands.register(Command::new("kiro-read")
+        .with_description("Read file from workspace")
+        .with_usage("/kiro-read <filename>")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            if args.is_empty() {
+                return Ok("Usage: /kiro-read <filename>".to_string());
+            }
+            
+            let filename = args.join(" ");
+            let filepath = format!("/workspace/default-workspace/{}", filename);
+            
+            let output = std::process::Command::new("docker")
+                .args(["exec", "kiro-persistent", "cat", &filepath])
+                .output();
+            
+            match output {
+                Ok(o) if o.status.success() => {
+                    let content = String::from_utf8_lossy(&o.stdout);
+                    if content.len() > 2000 {
+                        Ok(format!("📄 {} (truncated):\n```\n{}...```", filename, &content[..2000]))
+                    } else {
+                        Ok(format!("📄 {}:\n```\n{}```", filename, content))
+                    }
+                }
+                _ => Ok(format!("❌ File not found: {}", filename))
+            }
+        }));
+    
+    // kiro write - write file to workspace
+    commands.register(Command::new("kiro-write")
+        .with_description("Write file to workspace")
+        .with_usage("/kiro-write <filename> <content>")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            if args.len() < 2 {
+                return Ok("Usage: /kiro-write <filename> <content>\n\nTip: Use quotes for content with spaces.".to_string());
+            }
+            
+            let filename = &args[0];
+            let content = args[1..].join(" ");
+            let filepath = format!("/workspace/default-workspace/{}", filename);
+            
+            // Write using docker exec with bash
+            let cmd = format!("echo '{}' > {}", 
+                content.replace("'", "'\\''"),
+                filepath
+            );
+            
+            let output = std::process::Command::new("docker")
+                .args(["exec", "kiro-persistent", "bash", "-c", &cmd])
+                .output();
+            
+            match output {
+                Ok(o) if o.status.success() => Ok(format!("✅ Wrote to: {}", filename)),
+                _ => Ok("❌ Failed to write file.".to_string())
+            }
         }));
 }
 
