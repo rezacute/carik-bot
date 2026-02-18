@@ -716,7 +716,7 @@ fn register_kiro_command(commands: &mut CommandService) {
             }
             
             if args.is_empty() {
-                return Ok("Usage: /kiro <prompt>\n\nSubcommands:\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session\n/kiro-new - Start new conversation\n/kiro-resume - Resume last conversation\n/kiro-ls - List workspace files\n/kiro-read <file> - Read file\n/kiro-write <file> <content> - Write file".to_string());
+                return Ok("Usage: /kiro <prompt>\n\nSubcommands:\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session\n/kiro-new - Start new container\n/kiro-fresh - Start fresh conversation\n/kiro-ls - List workspace files\n/kiro-read <file> - Read file\n/kiro-write <file> <content> - Write file\n\nNote: /kiro automatically resumes last conversation.".to_string());
             }
             
             // Join all args as the prompt
@@ -899,6 +899,43 @@ fn register_kiro_command(commands: &mut CommandService) {
             }
         }));
     
+    // kiro fresh - start new conversation (no resume)
+    commands.register(Command::new("kiro-fresh")
+        .with_description("Start fresh conversation")
+        .with_handler(|msg| {
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            let workspace_dir = get_docker_workspace_dir();
+            let prompt = "Start a fresh conversation.";
+            
+            let cmd = format!(
+                "cd {} && kiro-cli chat --no-interactive --trust-all-tools \"{}\"",
+                workspace_dir,
+                prompt.replace("\"", "\\\"")
+            );
+            
+            let output = std::process::Command::new("docker")
+                .args(["exec", KIRO_CONTAINER, "bash", "-c", &cmd])
+                .output();
+            
+            let output = match output {
+                Ok(o) => o,
+                Err(e) => return Ok(format!("❌ Error: {}", e)),
+            };
+            
+            if output.status.success() {
+                let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+                Ok(format!("🔄 Fresh conversation started!\n\n{}", &stdout[..stdout.len().min(500)]))
+            } else {
+                let err = String::from_utf8_lossy(&output.stderr);
+                Ok(format!("❌ Error: {}", err))
+            }
+        }));
+    
     // kiro model - switch Kiro model
     commands.register(Command::new("kiro-model")
         .with_description("Switch Kiro model")
@@ -960,9 +997,9 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
         
         // Build command - quote the prompt to handle spaces
         let kiro_args = if model_arg.is_empty() {
-            "--no-interactive --trust-all-tools".to_string()
+            "--no-interactive --trust-all-tools --resume".to_string()
         } else {
-            format!("{} --no-interactive --trust-all-tools", model_arg)
+            format!("{} --no-interactive --trust-all-tools --resume", model_arg)
         };
         
         // Quote the prompt to handle multi-word prompts

@@ -47,6 +47,7 @@
 | `/kiro-read <file>` | Read file | Approved |
 | `/kiro-write <file> <content>` | Write file | Approved |
 | `/kiro-model [auto\|opus\|sonnet\|haiku]` | Switch model | Approved |
+| `/kiro-fresh` | Start fresh conversation | Approved |
 
 ## Quick Start
 

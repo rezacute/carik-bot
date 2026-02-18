@@ -13,8 +13,16 @@
 | `/kiro-read <file>` | Read file from workspace |
 | `/kiro-write <file> <content>` | Write file to workspace |
 | `/kiro-model [auto\|opus\|sonnet\|haiku]` | Switch Kiro model |
+| `/kiro-fresh` | Start fresh conversation (clear history) |
 
-## Examples
+## Session Persistence
+
+Kiro now automatically resumes the last conversation!
+
+- `/kiro <prompt>` - Automatically resumes previous conversation
+- `/kiro-fresh` - Start a completely new conversation
+
+The conversation is persisted in the Docker container and survives until you kill it with `/kiro-kill`.
 
 ### Run a prompt
 ```
@@ -65,8 +73,9 @@ Telegram -> carik-bot -> Docker (kiro-persistent) -> kiro-cli
 ## Session Management
 
 - Container persists until explicitly killed
-- Conversation history maintained in container
-- Use `/kiro-new` to start fresh conversation
+- Conversation history is automatically resumed between commands
+- Use `/kiro-fresh` to start a new conversation without history
+- Use `/kiro-kill` to stop the session
 
 ## Roadmap
 
