@@ -12,6 +12,7 @@
 | `/kiro-ls` | List workspace files |
 | `/kiro-read <file>` | Read file from workspace |
 | `/kiro-write <file> <content>` | Write file to workspace |
+| `/kiro-model [auto\|pro\|express]` | Switch Kiro model |
 
 ## Examples
 
@@ -33,6 +34,11 @@
 ### Write file
 ```
 /kiro-write test.txt Hello World
+```
+
+### Switch model
+```
+/kiro-model pro
 ```
 
 ### Start new conversation

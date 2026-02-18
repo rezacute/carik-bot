@@ -898,6 +898,37 @@ fn register_kiro_command(commands: &mut CommandService) {
                 _ => Ok("❌ Failed to write file.".to_string())
             }
         }));
+    
+    // kiro model - switch Kiro model
+    commands.register(Command::new("kiro-model")
+        .with_description("Switch Kiro model")
+        .with_usage("/kiro-model [auto|pro|express]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            if args.is_empty() {
+                return Ok("Available models:\n• auto - Auto-select (default)\n• pro - Kiro Pro\n• express - Kiro Express\n\nUsage: /kiro-model pro".to_string());
+            }
+            
+            let model = args[0].to_lowercase();
+            let model_arg = match model.as_str() {
+                "pro" | "express" | "auto" => format!("--model kiro-{}", model),
+                _ => return Ok("Unknown model. Use: auto, pro, or express".to_string()),
+            };
+            
+            // Save model preference to file
+            let _ = std::fs::write("/tmp/kiro-model.txt", &model_arg);
+            
+            Ok(format!("✅ Model set to: {}\n\nNote: This will be used for next /kiro command.", model))
+        }));
 }
 
 const KIRO_CONTAINER: &str = "kiro-persistent";
@@ -917,9 +948,16 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
     if is_running {
         // Container running - send prompt as argument
         let workspace_dir = get_docker_workspace_dir();
+        
+        // Check for model preference
+        let model_arg = std::fs::read_to_string("/tmp/kiro-model.txt")
+            .map(|m| m.trim().to_string())
+            .unwrap_or_default();
+        
         let cmd = format!(
-            "cd {} && kiro-cli chat --no-interactive --trust-all-tools {}",
+            "cd {} && kiro-cli chat --no-interactive --trust-all-tools {} {}",
             workspace_dir,
+            model_arg,
             prompt.replace("'", "'\\''")
         );
         
