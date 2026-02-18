@@ -8,6 +8,7 @@
 //! - LLM: AI integration
 
 pub mod config;
+pub mod database;
 pub mod storage;
 pub mod adapters;
 pub mod plugins;

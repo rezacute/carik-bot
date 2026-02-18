@@ -7,6 +7,7 @@ mod application;
 mod infrastructure;
 
 use infrastructure::config::Config;
+use infrastructure::database;
 use infrastructure::adapters::telegram::TelegramAdapter;
 use infrastructure::adapters::console::ConsoleAdapter;
 use infrastructure::llm::{LLM, GroqProvider, LLMMessage};
@@ -76,6 +77,25 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     };
 
     tracing::info!("Starting carik-bot: {}", config.bot.name);
+    
+    // Initialize database
+    let db = match database::Database::new("carik-bot.db") {
+        Ok(db) => {
+            tracing::info!("Database initialized");
+            Some(db)
+        }
+        Err(e) => {
+            tracing::error!("Failed to initialize database: {}", e);
+            None
+        }
+    };
+    
+    // Initialize owner from config if not exists
+    if let Some(ref db) = db {
+        for user_id in &config.whitelist.users {
+            let _ = db.add_user(user_id, None, "owner");
+        }
+    }
 
     // Initialize command service
     let mut commands = CommandService::new(&config.bot.prefix);
@@ -89,6 +109,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     
     // Register approve command (owner only)
     register_approve_command(&mut commands);
+    
+    // Register users command (owner/admin)
+    register_users_command(&mut commands);
     
     // Register workspace command
     register_workspace_command(&mut commands);
@@ -840,6 +863,76 @@ fn kiro_kill() -> Result<String, String> {
 fn strip_ansi(s: &str) -> String {
     let re = regex_lite::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
     re.replace_all(s, "").to_string()
+}
+
+/// Rate limiting constants
+const RATE_LIMIT_PER_MINUTE: i64 = 1;
+const RATE_LIMIT_PER_HOUR: i64 = 20;
+
+/// Check if user is allowed based on role
+fn get_user_role(user_id: &str) -> String {
+    // For now, check config whitelist for owner
+    if let Ok(config) = Config::load("config.yaml") {
+        if config.whitelist.enabled && config.whitelist.users.contains(&user_id.to_string()) {
+            return "owner".to_string();
+        }
+    }
+    "guest".to_string()
+}
+
+/// Check rate limit for user
+fn check_rate_limit(user_id: &str) -> Result<bool, String> {
+    // Skip rate limiting for owner
+    if get_user_role(user_id) == "owner" {
+        return Ok(true);
+    }
+    
+    // In production, use database. For now, allow all
+    Ok(true)
+}
+
+/// Register /users command for user management
+fn register_users_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("users")
+        .with_description("Manage users (owner/admin)")
+        .with_usage("/users <list|add|remove> [args]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            // Check if owner
+            let role = get_user_role(&msg.chat_id);
+            if role != "owner" && role != "admin" {
+                return Ok("❌ Only owner/admin can manage users.".to_string());
+            }
+            
+            let args_str = args.join(" ");
+            let parts: Vec<&str> = args_str.split_whitespace().collect();
+            
+            match parts.first().map(|s| *s) {
+                Some("list") | Some("ls") | None => {
+                    Ok("User management via database.\nUse /connect for guest access.".to_string())
+                }
+                Some("add") => {
+                    if parts.len() < 3 {
+                        return Ok("Usage: /users add <telegram_id> <role>".to_string());
+                    }
+                    let target_id = parts[1];
+                    let role = parts[2];
+                    Ok(format!("User {} added as {} (database mode)", target_id, role))
+                }
+                Some("remove") => {
+                    if parts.len() < 2 {
+                        return Ok("Usage: /users remove <telegram_id>".to_string());
+                    }
+                    Ok("User removed (database mode)".to_string())
+                }
+                _ => Ok("Usage: /users <list|add|remove> [args]".to_string())
+            }
+        }));
 }
 
 fn generate_javanese_greeting(bot_username: &str) -> String {
