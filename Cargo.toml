@@ -35,7 +35,8 @@ regex-lite = "0.1"
 once_cell = "1.19"
 
 # HTTP Client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+rss = "2.0"
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }

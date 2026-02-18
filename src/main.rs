@@ -143,6 +143,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     
     // Register kiro command
     register_kiro_command(&mut commands);
+    
+    // Register RSS command
+    register_rss_command(&mut commands);
 
     // Select adapter
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1361,6 +1364,95 @@ async fn run_console_bot<B: Bot>(bot: B, mut commands: CommandService) {
                 let _ = bot.send_message("console", &format!("Echo: {}", input)).await;
             }
         }
+    }
+}
+
+fn register_rss_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    // RSS feed presets
+    let feeds = vec![
+        ("yahoo", "Yahoo News", "https://news.yahoo.com/rss/topstories"),
+        ("google", "Google News", "https://news.google.com/rss"),
+        ("bbc", "BBC News", "http://feeds.bbci.co.uk/news/rss.xml"),
+        ("techcrunch", "TechCrunch", "https://techcrunch.com/feed/"),
+        ("hn", "Hacker News", "https://hnrss.org/newest"),
+    ];
+    
+    // Main rss command
+    commands.register(Command::new("rss")
+        .with_description("Fetch RSS feeds")
+        .with_usage("/rss [feed_name|list|URL]")
+        .with_handler(move |msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            if args.is_empty() {
+                // Fetch default feed using blocking reqwest
+                let url = "https://news.yahoo.com/rss/topstories".to_string();
+                return Ok(fetch_rss_feed_blocking(&url));
+            }
+            
+            let query = args.join(" ").to_lowercase();
+            
+            if query == "list" {
+                let list: Vec<String> = feeds.iter()
+                    .map(|(key, name, _)| format!("• {} - {}", name, key))
+                    .collect();
+                return Ok(format!("📡 Available Feeds:\n\n{}\n\nUsage: /rss <name>", list.join("\n")));
+            }
+            
+            // Find matching feed
+            let matched = feeds.iter()
+                .find(|(key, name, _)| key.contains(&query) || name.to_lowercase().contains(&query));
+            
+            let url = matched.map(|(_, _, url)| url.to_string()).unwrap_or(query);
+            
+            Ok(fetch_rss_feed_blocking(&url))
+        }));
+}
+
+fn fetch_rss_feed_blocking(url: &str) -> String {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build() 
+    {
+        Ok(c) => c,
+        Err(e) => return format!("❌ Client error: {}", e),
+    };
+    
+    match client.get(url)
+        .header("User-Agent", "CarikBot/1.0")
+        .send() 
+    {
+        Ok(response) => {
+            match response.bytes() {
+                Ok(bytes) => {
+                    match rss::Channel::read_from(&bytes[..]) {
+                        Ok(channel) => {
+                            let title = channel.title();
+                            let items: Vec<String> = channel.items().iter()
+                                .take(5)
+                                .map(|item| {
+                                    let title = item.title().unwrap_or("No title");
+                                    let link = item.link().unwrap_or("");
+                                    format!("📰 {}\n🔗 {}", title, link)
+                                })
+                                .collect();
+                            
+                            format!("📡 *{}*\n\n{}", 
+                                title.replace('*', "\\*"),
+                                items.join("\n\n")
+                            )
+                        }
+                        Err(e) => format!("❌ Parse error: {}", e)
+                    }
+                }
+                Err(e) => format!("❌ Read error: {}", e)
+            }
+        }
+        Err(e) => format!("❌ Fetch error: {}", e)
     }
 }
 
