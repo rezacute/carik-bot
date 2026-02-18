@@ -954,11 +954,19 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
             .map(|m| m.trim().to_string())
             .unwrap_or_default();
         
+        // Build command - quote the prompt to handle spaces
+        let kiro_args = if model_arg.is_empty() {
+            "--no-interactive --trust-all-tools".to_string()
+        } else {
+            format!("{} --no-interactive --trust-all-tools", model_arg)
+        };
+        
+        // Quote the prompt to handle multi-word prompts
         let cmd = format!(
-            "cd {} && kiro-cli chat --no-interactive --trust-all-tools {} {}",
+            "cd {} && kiro-cli chat {} \"{}\"",
             workspace_dir,
-            model_arg,
-            prompt.replace("'", "'\\''")
+            kiro_args,
+            prompt.replace("\"", "\\\"")
         );
         
         let output = std::process::Command::new("docker")
@@ -971,7 +979,7 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
             let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
             tracing::info!("Kiro stdout length: {}", stdout.len());
             // Save output for kiro-log
-            match std::fs::write("/tmp/kiro-last-output.txt", stdout.to_string()) {
+            match std::fs::write("/home/ubuntu/.carik-bot/kiro-last-output.txt", stdout.to_string()) {
                 Ok(_) => tracing::info!("Output saved to file"),
                 Err(e) => tracing::error!("Failed to save output: {}", e),
             }
@@ -979,7 +987,7 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
             tracing::error!("Kiro error: {}", err);
-            let _ = std::fs::write("/tmp/kiro-last-output.txt", err.to_string());
+            let _ = std::fs::write("/home/ubuntu/.carik-bot/kiro-last-output.txt", err.to_string());
             return Ok(format!("❌ Kiro error: {}", err));
         }
     }
@@ -1008,8 +1016,8 @@ fn kiro_status() -> Result<String, String> {
 }
 
 fn kiro_log() -> Result<String, String> {
-    // Try to read from stored output file first
-    let output_file = "/tmp/kiro-last-output.txt";
+    // Try to read from stored output file first (use workspace path)
+    let output_file = "/home/ubuntu/.carik-bot/kiro-last-output.txt";
     if let Ok(content) = std::fs::read_to_string(output_file) {
         if !content.is_empty() {
             return Ok(format!("📋 Last Kiro output:\n```\n{}```", &content[..content.len().min(3000)]));
