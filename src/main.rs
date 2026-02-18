@@ -1069,13 +1069,14 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
         
         if output.status.success() {
             let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-            tracing::info!("Kiro stdout length: {}", stdout.len());
+            let cleaned = clean_kiro_output(&stdout);
+            tracing::info!("Kiro stdout length: {}", cleaned.len());
             // Save output for kiro-log
-            match std::fs::write("/home/ubuntu/.carik-bot/kiro-last-output.txt", stdout.to_string()) {
+            match std::fs::write("/home/ubuntu/.carik-bot/kiro-last-output.txt", cleaned.to_string()) {
                 Ok(_) => tracing::info!("Output saved to file"),
                 Err(e) => tracing::error!("Failed to save output: {}", e),
             }
-            return Ok(format!("📤 Kiro response:\n{}\n\nUse /kiro-log for full output.", &stdout[..stdout.len().min(500)]));
+            return Ok(format!("📤 Kiro response:\n{}\n\nUse /kiro-log for full output.", &cleaned[..cleaned.len().min(500)]));
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
             tracing::error!("Kiro error: {}", err);
@@ -1152,6 +1153,22 @@ fn kiro_kill() -> Result<String, String> {
 fn strip_ansi(s: &str) -> String {
     let re = regex_lite::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
     re.replace_all(s, "").to_string()
+}
+
+/// Clean up Kiro output - remove credits, time, and trailing artifacts
+fn clean_kiro_output(s: &str) -> String {
+    let mut output = s.to_string();
+    
+    // Remove the credits/time footer line (e.g., "▸ Credits: 0.03 • Time: 2s")
+    if let Some(pos) = output.rfind("Credits:") {
+        output = output[..pos].trim().to_string();
+    }
+    
+    // Remove ANSI escape sequences
+    output = strip_ansi(&output);
+    
+    // Remove any remaining trailing whitespace
+    output.trim().to_string()
 }
 
 /// Rate limiting constants
