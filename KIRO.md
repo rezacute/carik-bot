@@ -12,7 +12,7 @@
 | `/kiro-ls` | List workspace files |
 | `/kiro-read <file>` | Read file from workspace |
 | `/kiro-write <file> <content>` | Write file to workspace |
-| `/kiro-model [auto\|pro\|express]` | Switch Kiro model |
+| `/kiro-model [auto\|opus\|sonnet\|haiku]` | Switch Kiro model |
 
 ## Examples
 
@@ -38,7 +38,7 @@
 
 ### Switch model
 ```
-/kiro-model pro
+/kiro-model opus
 ```
 
 ### Start new conversation

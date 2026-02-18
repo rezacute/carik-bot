@@ -902,7 +902,7 @@ fn register_kiro_command(commands: &mut CommandService) {
     // kiro model - switch Kiro model
     commands.register(Command::new("kiro-model")
         .with_description("Switch Kiro model")
-        .with_usage("/kiro-model [auto|pro|express]")
+        .with_usage("/kiro-model [auto|opus|sonnet|haiku]")
         .with_handler(|msg| {
             let Content::Command { name: _, args } = &msg.content else {
                 return Ok("Error: invalid command".to_string());
@@ -915,13 +915,13 @@ fn register_kiro_command(commands: &mut CommandService) {
             }
             
             if args.is_empty() {
-                return Ok("Available models:\n• auto - Auto-select (default)\n• pro - Kiro Pro\n• express - Kiro Express\n\nUsage: /kiro-model pro".to_string());
+                return Ok("Available models:\n• auto - Auto-select (default)\n• opus - Kiro Opus\n• sonnet - Kiro Sonnet\n• haiku - Kiro Haiku\n\nUsage: /kiro-model opus".to_string());
             }
             
             let model = args[0].to_lowercase();
             let model_arg = match model.as_str() {
-                "pro" | "express" | "auto" => format!("--model kiro-{}", model),
-                _ => return Ok("Unknown model. Use: auto, pro, or express".to_string()),
+                "opus" | "sonnet" | "haiku" | "auto" => format!("--model {}", model),
+                _ => return Ok("Unknown model. Use: auto, opus, sonnet, or haiku".to_string()),
             };
             
             // Save model preference to file

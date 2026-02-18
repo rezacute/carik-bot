@@ -46,7 +46,7 @@
 | `/kiro-ls` | List workspace files | Approved |
 | `/kiro-read <file>` | Read file | Approved |
 | `/kiro-write <file> <content>` | Write file | Approved |
-| `/kiro-model [auto\|pro\|express]` | Switch model | Approved |
+| `/kiro-model [auto\|opus\|sonnet\|haiku]` | Switch model | Approved |
 
 ## Quick Start
 
