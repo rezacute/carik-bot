@@ -33,8 +33,19 @@
 | `/approve <id>` | Approve guest (owner) | Owner |
 | `/users` | Manage users | Owner/Admin |
 | `/workspace` | Manage workspaces | All |
-| `/code` | Run kiro-cli coding agent | Approved |
-| `/kiro` | Run kiro in Docker | Approved |
+
+### Kiro Commands (AI Agent in Docker)
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/kiro <prompt>` | Run kiro with prompt | Approved |
+| `/kiro-status` | Check if kiro running | Approved |
+| `/kiro-log` | View last output | Approved |
+| `/kiro-kill` | Stop kiro session | Approved |
+| `/kiro-new` | Start new conversation | Approved |
+| `/kiro-ls` | List workspace files | Approved |
+| `/kiro-read <file>` | Read file | Approved |
+| `/kiro-write <file> <content>` | Write file | Approved |
 
 ## Quick Start
 
