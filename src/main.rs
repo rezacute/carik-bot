@@ -81,6 +81,15 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     let mut commands = CommandService::new(&config.bot.prefix);
     commands.register_defaults();
     
+    // Register start command (welcome message)
+    register_start_command(&mut commands);
+    
+    // Register connect command (for guests)
+    register_connect_command(&mut commands);
+    
+    // Register approve command (owner only)
+    register_approve_command(&mut commands);
+    
     // Register workspace command
     register_workspace_command(&mut commands);
     
@@ -166,9 +175,14 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
     let mut offset: i64 = 0;
     let timeout_seconds = 30;
 
+    tracing::info!("Starting message loop...");
+    
     loop {
         match bot.get_updates(offset, timeout_seconds).await {
             Ok(updates) => {
+                if !updates.is_empty() {
+                    tracing::info!("Received {} updates", updates.len());
+                }
                 for update in &updates {
                     // Extract chat_id and text from message
                     if let Some(msg) = &update.message {
@@ -187,23 +201,33 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                 // Check for /code command (coding agent)
                                 let trimmed = text.trim_start_matches(&commands.prefix()).trim_start_matches('/');
                                 if trimmed.starts_with("code") {
-                                    // Extract the prompt from /code command
-                                    let prompt = if trimmed.starts_with("code ") {
-                                        // Has space after "code", grab everything after position 5
-                                        trimmed[5..].trim().to_string()
-                                    } else if trimmed.len() > 5 {
-                                        // Has content after "code" (no space) - grab from position 4
-                                        trimmed[4..].trim().to_string()
-                                    } else {
-                                        // Just "code" or "/code" with nothing after
-                                        String::new()
-                                    };
-                                    
-                                    if prompt.is_empty() {
-                                        "Usage: /code <your coding task>\nExample: /code write a hello world in python".to_string()
-                                    } else {
-                                        // Execute kiro-cli as coding agent
-                                        execute_kiro_cli(&prompt).await
+                                    // Check guest access first
+                                    let chat_id_str = chat_id.to_string();
+                                    match can_use_privileged(&chat_id_str) {
+                                        Ok(false) => {
+                                            "❌ Access denied.\n\nUse /connect to request one-time guest access,\nor ask the owner to add you.".to_string()
+                                        }
+                                        Err(e) => format!("Error: {}", e),
+                                        _ => {
+                                            // Extract the prompt from /code command
+                                            let prompt = if trimmed.starts_with("code ") {
+                                                // Has space after "code", grab everything after position 5
+                                                trimmed[5..].trim().to_string()
+                                            } else if trimmed.len() > 5 {
+                                                // Has content after "code" (no space) - grab from position 4
+                                                trimmed[4..].trim().to_string()
+                                            } else {
+                                                // Just "code" or "/code" with nothing after
+                                                String::new()
+                                            };
+                                            
+                                            if prompt.is_empty() {
+                                                "Usage: /code <your coding task>\nExample: /code write a hello world in python".to_string()
+                                            } else {
+                                                // Execute kiro-cli as coding agent
+                                                execute_kiro_cli(&prompt).await
+                                            }
+                                        }
                                     }
                                 } else {
                                     let cmd_parts: Vec<&str> = trimmed.split_whitespace().collect();
@@ -371,6 +395,142 @@ fn strip_ansi_codes(s: &str) -> String {
         .join("\n")
 }
 
+/// Connect command for guest access
+
+/// Check if user can use privileged commands (/code, /kiro)
+fn can_use_privileged(user_id: &str) -> Result<bool, String> {
+    let config = Config::load("config.yaml").map_err(|e| e.to_string())?;
+    
+    // Whitelist users always have access
+    if config.whitelist.enabled && config.whitelist.users.contains(&user_id.to_string()) {
+        return Ok(true);
+    }
+    
+    // Check if guest has been approved
+    if config.guests.enabled && config.guests.approved.contains(&user_id.to_string()) {
+        return Ok(true);
+    }
+    
+    Ok(false)
+}
+
+/// Start command - shows welcome message
+fn register_start_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("start")
+        .with_description("Start conversation")
+        .with_handler(|_msg| {
+            Ok(generate_javanese_greeting("carik-bot"))
+        }));
+}
+
+fn register_connect_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("connect")
+        .with_description("Request one-time access (guests)")
+        .with_usage("/connect")
+        .with_handler(|msg| {
+            let Content::Command { name, args: _ } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            let user_id = msg.chat_id.clone();
+            
+            // Load config
+            let config = Config::load("config.yaml").map_err(|e| 
+                crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+            
+            // Check if whitelist is enabled - if so, connect not needed
+            if config.whitelist.enabled && config.whitelist.users.contains(&user_id) {
+                return Ok("You already have full access!".to_string());
+            }
+            
+            // Check if already pending approval
+            if config.guests.pending.contains(&user_id) {
+                return Ok("⏳ Your request is pending approval.\n\nWait for the owner to approve you.".to_string());
+            }
+            
+            // Check if already approved
+            if config.guests.approved.contains(&user_id) {
+                return Ok("✅ You're already approved! Use /code or /kiro".to_string());
+            }
+            
+            // Add to pending list
+            let mut guests = config.guests.clone();
+            guests.pending.push(user_id.clone());
+            
+            let mut new_config = config.clone();
+            new_config.guests = guests;
+            new_config.save("config.yaml").map_err(|e| 
+                crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+            
+            Ok("✅ Request sent! Your ID: {}\n\nWait for owner to approve with /approve {}".to_string())
+        }));
+}
+
+/// Approve command for owner to approve guest requests
+fn register_approve_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("approve")
+        .with_description("Approve guest request (owner only)")
+        .with_usage("/approve <user_id>")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            let user_id = msg.chat_id.clone();
+            
+            // Check if owner (only allow owner to approve)
+            let config = Config::load("config.yaml").map_err(|e| 
+                crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+            
+            if !config.whitelist.users.contains(&user_id) {
+                return Ok("❌ Only owner can approve requests.".to_string());
+            }
+            
+            if args.is_empty() {
+                // List pending requests
+                let pending = config.guests.pending;
+                if pending.is_empty() {
+                    return Ok("No pending requests.".to_string());
+                }
+                return Ok(format!("Pending requests:\n{}\n\nUse /approve <id> to approve.", 
+                    pending.iter().map(|id| format!("- {}", id)).collect::<Vec<_>>().join("\n")));
+            }
+            
+            let target_id = args[0].clone();
+            
+            // Check if in pending
+            if !config.guests.pending.contains(&target_id) {
+                return Ok("User not in pending list.".to_string());
+            }
+            
+            // Move from pending to approved
+            let mut guests = config.guests.clone();
+            guests.pending.retain(|id| id != &target_id);
+            guests.approved.push(target_id.clone());
+            
+            // Also add to whitelist
+            let mut whitelist = config.whitelist.clone();
+            if !whitelist.users.contains(&target_id) {
+                whitelist.users.push(target_id.clone());
+            }
+            
+            let mut new_config = config;
+            new_config.guests = guests;
+            new_config.whitelist = whitelist;
+            new_config.save("config.yaml").map_err(|e| 
+                crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+            
+            let greeting = generate_javanese_greeting("carik-bot");
+            Ok(format!("✅ Approved! User: {}\n\n{}\n\nThey can now use /code or /kiro", target_id, greeting))
+        }));
+}
+
 /// Workspace management
 const CARIK_HOME: &str = "/home/ubuntu/.carik-bot";
 
@@ -507,12 +667,21 @@ fn register_kiro_command(commands: &mut CommandService) {
     
     // Main kiro command - handles /kiro <prompt>
     commands.register(Command::new("kiro")
-        .with_description("Run kiro-cli in tmux")
+        .with_description("Run kiro-cli in Docker")
         .with_usage("/kiro <prompt>")
         .with_handler(|msg| {
             let Content::Command { name: _, args } = &msg.content else {
                 return Ok("Error: invalid command".to_string());
             };
+            
+            // Check access
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => {
+                    return Ok("❌ Access denied.\n\nUse /connect to request one-time guest access,\nor ask the owner to add you.".to_string());
+                }
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
             
             if args.is_empty() {
                 return Ok("Usage: /kiro <prompt>\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session".to_string());
@@ -530,11 +699,31 @@ fn register_kiro_command(commands: &mut CommandService) {
     
     commands.register(Command::new("kiro-log")
         .with_description("Get kiro output")
-        .with_handler(|_| kiro_log().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))));
+        .with_handler(|msg| {
+            // Check access
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => {
+                    return Ok("❌ Access denied. Use /connect first.".to_string());
+                }
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            kiro_log().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))
+        }));
     
     commands.register(Command::new("kiro-kill")
         .with_description("Kill kiro session")
-        .with_handler(|_| kiro_kill().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))));
+        .with_handler(|msg| {
+            // Check access
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => {
+                    return Ok("❌ Access denied. Use /connect first.".to_string());
+                }
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            kiro_kill().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))
+        }));
 }
 
 const KIRO_CONTAINER: &str = "kiro-persistent";

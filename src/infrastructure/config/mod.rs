@@ -13,6 +13,7 @@ pub struct Config {
     pub security: SecurityConfig,
     pub adapters: AdaptersConfig,
     pub whitelist: WhitelistConfig,
+    pub guests: GuestConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -64,6 +65,15 @@ pub struct AuditConfig {
 pub struct WhitelistConfig {
     pub enabled: bool,
     pub users: Vec<String>,
+}
+
+/// Guest configuration for one-time command access
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct GuestConfig {
+    pub enabled: bool,
+    pub pending: Vec<String>,   // User IDs waiting for approval
+    pub approved: Vec<String>,  // User IDs who have been approved
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -124,6 +134,11 @@ impl Default for Config {
                 enabled: true,
                 users: vec!["6504720757".to_string()],
             },
+            guests: GuestConfig {
+                enabled: true,
+                pending: vec![],
+                approved: vec![],
+            },
         }
     }
 }
@@ -136,6 +151,15 @@ impl Config {
 
         serde_yaml::from_str(&content)
             .map_err(|e| ConfigError::Parse(format!("Failed to parse config: {}", e)))
+    }
+    
+    pub fn save(&self, path: impl Into<PathBuf>) -> Result<(), ConfigError> {
+        let path = path.into();
+        let content = serde_yaml::to_string(self)
+            .map_err(|e| ConfigError::Parse(format!("Failed to serialize config: {}", e)))?;
+        
+        std::fs::write(&path, content)
+            .map_err(|e| ConfigError::Parse(format!("Failed to write config: {}", e)))
     }
 
     /// Check if a user ID is whitelisted

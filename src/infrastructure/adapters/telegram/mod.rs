@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::domain::traits::{Bot, BotInfo, KeyboardButton};
 use crate::application::errors::BotError;
+use crate::infrastructure::config;
 
 /// Telegram API base URL
 const API_BASE: &str = "https://api.telegram.org";
@@ -76,6 +77,13 @@ impl TelegramAdapter {
             true // No whitelist configured, allow all
         } else {
             self.allowed_user_ids.contains(&user_id.to_string())
+        }
+    }
+    
+    /// Add a user to the allowed list (e.g., when they use /connect)
+    pub fn add_allowed_user(&mut self, user_id: String) {
+        if !self.allowed_user_ids.contains(&user_id) {
+            self.allowed_user_ids.push(user_id);
         }
     }
 
@@ -293,8 +301,21 @@ impl Bot for TelegramAdapter {
     async fn send_message(&self, chat_id: &str, text: &str) -> Result<String, BotError> {
         tracing::debug!("Sending to {}: {}", chat_id, text);
         
-        // Check whitelist if configured
-        if !self.allowed_user_ids.is_empty() && !self.is_user_allowed(chat_id) {
+        // Check whitelist - both in-memory and config file
+        let in_memory_allowed = self.allowed_user_ids.is_empty() || self.is_user_allowed(chat_id);
+        
+        // Also check config file for dynamically added users
+        let config_allowed = if !in_memory_allowed {
+            if let Ok(config) = crate::infrastructure::config::Config::load("config.yaml") {
+                config.whitelist.users.contains(&chat_id.to_string())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+        
+        if !in_memory_allowed && !config_allowed {
             tracing::warn!("Unauthorized user attempted to send message: {}", chat_id);
             return Err(BotError::Unauthorized("User not in whitelist".to_string()));
         }
