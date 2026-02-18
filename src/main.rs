@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber;
 use std::fs;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 mod domain;
 mod application;
@@ -13,6 +15,9 @@ use infrastructure::adapters::console::ConsoleAdapter;
 use infrastructure::llm::{LLM, GroqProvider, LLMMessage};
 use application::services::CommandService;
 use domain::traits::Bot;
+
+// Global database instance
+static DB: Lazy<Mutex<Option<database::Database>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Parser)]
 #[command(name = "carik-bot")]
@@ -82,7 +87,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     let db = match database::Database::new("carik-bot.db") {
         Ok(db) => {
             tracing::info!("Database initialized");
-            Some(db)
+            // Set global DB
+            *DB.lock().unwrap() = Some(db);
+            Some(())
         }
         Err(e) => {
             tracing::error!("Failed to initialize database: {}", e);
@@ -91,9 +98,11 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     };
     
     // Initialize owner from config if not exists
-    if let Some(ref db) = db {
-        for user_id in &config.whitelist.users {
-            let _ = db.add_user(user_id, None, "owner");
+    if DB.lock().unwrap().is_some() {
+        if let Ok(config) = Config::load("config.yaml") {
+            for user_id in &config.whitelist.users {
+                let _ = DB.lock().unwrap().as_ref().unwrap().add_user(user_id, None, "owner");
+            }
         }
     }
 
@@ -871,12 +880,22 @@ const RATE_LIMIT_PER_HOUR: i64 = 20;
 
 /// Check if user is allowed based on role
 fn get_user_role(user_id: &str) -> String {
-    // For now, check config whitelist for owner
+    // First check database
+    if let Ok(db_guard) = DB.lock() {
+        if let Some(db) = db_guard.as_ref() {
+            if let Ok(Some(user)) = db.get_user_by_telegram_id(user_id) {
+                return user.role;
+            }
+        }
+    }
+    
+    // Fallback to config whitelist for owner
     if let Ok(config) = Config::load("config.yaml") {
         if config.whitelist.enabled && config.whitelist.users.contains(&user_id.to_string()) {
             return "owner".to_string();
         }
     }
+    
     "guest".to_string()
 }
 
@@ -887,7 +906,32 @@ fn check_rate_limit(user_id: &str) -> Result<bool, String> {
         return Ok(true);
     }
     
-    // In production, use database. For now, allow all
+    // Get database
+    let db_guard = DB.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    
+    // Get user from database
+    let user = db.get_user_by_telegram_id(user_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("User not found")?;
+    
+    // Check minute rate limit
+    let min_count = db.count_recent_queries(user.id, "query", 1)
+        .map_err(|e| e.to_string())?;
+    if min_count >= RATE_LIMIT_PER_MINUTE {
+        return Ok(false);
+    }
+    
+    // Check hourly rate limit
+    let hour_count = db.count_hourly_queries(user.id, "query")
+        .map_err(|e| e.to_string())?;
+    if hour_count >= RATE_LIMIT_PER_HOUR {
+        return Ok(false);
+    }
+    
+    // Record the query
+    db.record_query(user.id, "query").map_err(|e| e.to_string())?;
+    
     Ok(true)
 }
 
