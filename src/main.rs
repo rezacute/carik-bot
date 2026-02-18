@@ -915,17 +915,21 @@ fn register_kiro_command(commands: &mut CommandService) {
             }
             
             if args.is_empty() {
-                return Ok("Available models:\n• auto - Auto-select (default)\n• opus - Kiro Opus\n• sonnet - Kiro Sonnet\n• haiku - Kiro Haiku\n\nUsage: /kiro-model opus".to_string());
+                return Ok("Available models:\n• auto - Auto-select (default)\n• opus - Claude Opus 4.6\n• sonnet - Claude Sonnet 4.6\n• haiku - Claude Haiku 4.5\n\nUsage: /kiro-model opus".to_string());
             }
             
             let model = args[0].to_lowercase();
+            // Map to actual Claude model names
             let model_arg = match model.as_str() {
-                "opus" | "sonnet" | "haiku" | "auto" => format!("--model {}", model),
+                "opus" => "--model claude-opus-4.6",
+                "sonnet" => "--model claude-sonnet-4.6",
+                "haiku" => "--model claude-haiku-4.5",
+                "auto" => "",
                 _ => return Ok("Unknown model. Use: auto, opus, sonnet, or haiku".to_string()),
             };
             
             // Save model preference to file
-            let _ = std::fs::write("/tmp/kiro-model.txt", &model_arg);
+            let _ = std::fs::write("/home/ubuntu/.carik-bot/kiro-model.txt", &model_arg);
             
             Ok(format!("✅ Model set to: {}\n\nNote: This will be used for next /kiro command.", model))
         }));
@@ -950,7 +954,7 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
         let workspace_dir = get_docker_workspace_dir();
         
         // Check for model preference
-        let model_arg = std::fs::read_to_string("/tmp/kiro-model.txt")
+        let model_arg = std::fs::read_to_string("/home/ubuntu/.carik-bot/kiro-model.txt")
             .map(|m| m.trim().to_string())
             .unwrap_or_default();
         
