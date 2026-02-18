@@ -219,7 +219,28 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                     // Extract chat_id and text from message
                     if let Some(msg) = &update.message {
                         let chat_id = msg.chat.id.to_string();
-                        let text = msg.text.clone().unwrap_or_default();
+                        let mut text = msg.text.clone().unwrap_or_default();
+                        
+                        // Check if bot is mentioned in group (group chats have negative IDs)
+                        let chat_id_i64: i64 = chat_id.parse().unwrap_or(0);
+                        let is_group = chat_id_i64 < 0;
+                        let is_mention = if is_group && !text.starts_with('/') {
+                            let mention = format!("@{}", info.username);
+                            if text.to_lowercase().contains(&mention.to_lowercase()) {
+                                // Remove mention from text
+                                text = text.replace(&mention, "").replace(&mention.to_lowercase(), "").trim().to_string();
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        
+                        // Skip if just mentioned without any actual text
+                        if text.is_empty() {
+                            continue;
+                        }
                         
                         if !text.is_empty() {
                             // Check if this is the first message from this chat
