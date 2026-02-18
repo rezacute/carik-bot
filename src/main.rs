@@ -83,6 +83,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     
     // Register workspace command
     register_workspace_command(&mut commands);
+    
+    // Register kiro command
+    register_kiro_command(&mut commands);
 
     // Select adapter
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -203,12 +206,11 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                         execute_kiro_cli(&prompt).await
                                     }
                                 } else {
-                                    let cmd_name = trimmed
-                                        .split_whitespace()
-                                        .next()
-                                        .unwrap_or("");
+                                    let cmd_parts: Vec<&str> = trimmed.split_whitespace().collect();
+                                    let cmd_name = cmd_parts.first().unwrap_or(&"").to_string();
+                                    let args: Vec<String> = cmd_parts[1..].iter().map(|s| s.to_string()).collect();
                                     
-                                    let msg = Message::from_command(&chat_id, cmd_name, vec![]);
+                                    let msg = Message::from_command(&chat_id, cmd_name, args);
                                     match commands.handle(&msg) {
                                         Ok(Some(response)) => response,
                                         Ok(None) => continue,
@@ -490,6 +492,165 @@ fn get_current_workspace() -> Result<String, String> {
 
 fn get_workspace_dir() -> std::path::PathBuf {
     std::path::Path::new(CARIK_HOME).join("default-workspace")
+}
+
+fn get_docker_workspace_dir() -> String {
+    "/workspace/default-workspace".to_string()
+}
+
+/// Kiro CLI tmux session management
+const KIRO_SOCKET: &str = "/tmp/carik-kiro.sock";
+const KIRO_SESSION: &str = "carik-kiro";
+
+fn register_kiro_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    // Main kiro command - handles /kiro <prompt>
+    commands.register(Command::new("kiro")
+        .with_description("Run kiro-cli in tmux")
+        .with_usage("/kiro <prompt>")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            if args.is_empty() {
+                return Ok("Usage: /kiro <prompt>\n/kiro-status - Check if running\n/kiro-log - See output\n/kiro-kill - Stop session".to_string());
+            }
+            
+            // Join all args as the prompt
+            let prompt = args.join(" ");
+            kiro_start(&prompt).map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))
+        }));
+    
+    // Subcommands
+    commands.register(Command::new("kiro-status")
+        .with_description("Check kiro status")
+        .with_handler(|_| kiro_status().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))));
+    
+    commands.register(Command::new("kiro-log")
+        .with_description("Get kiro output")
+        .with_handler(|_| kiro_log().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))));
+    
+    commands.register(Command::new("kiro-kill")
+        .with_description("Kill kiro session")
+        .with_handler(|_| kiro_kill().map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e))));
+}
+
+const KIRO_CONTAINER: &str = "kiro-persistent";
+
+fn kiro_start(prompt: &str) -> Result<String, String> {
+    // Check if container is running
+    let check = std::process::Command::new("docker")
+        
+        .args(["inspect", "-f", "{{.State.Running}}", KIRO_CONTAINER])
+        .output();
+    
+    let is_running = check
+        .as_ref()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "true")
+        .unwrap_or(false);
+    
+    if is_running {
+        // Container running - send prompt as argument
+        let workspace_dir = get_docker_workspace_dir();
+        let cmd = format!(
+            "cd {} && kiro-cli chat --no-interactive --trust-all-tools {}",
+            workspace_dir,
+            prompt.replace("'", "'\\''")
+        );
+        
+        let output = std::process::Command::new("docker")
+        
+            .args(["exec", KIRO_CONTAINER, "bash", "-c", &cmd])
+            .output()
+            .map_err(|e| e.to_string())?;
+        
+        if output.status.success() {
+            let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+            tracing::info!("Kiro stdout length: {}", stdout.len());
+            // Save output for kiro-log
+            match std::fs::write("/tmp/kiro-last-output.txt", stdout.to_string()) {
+                Ok(_) => tracing::info!("Output saved to file"),
+                Err(e) => tracing::error!("Failed to save output: {}", e),
+            }
+            return Ok(format!("📤 Kiro response:\n{}\n\nUse /kiro-log for full output.", &stdout[..stdout.len().min(500)]));
+        } else {
+            let err = String::from_utf8_lossy(&output.stderr);
+            tracing::error!("Kiro error: {}", err);
+            let _ = std::fs::write("/tmp/kiro-last-output.txt", err.to_string());
+            return Ok(format!("❌ Kiro error: {}", err));
+        }
+    }
+    
+    // Container not running - start it
+    // Note: Container should already be started as a service
+    // This is just a fallback
+    Ok("Kiro container not running. Please restart the bot.".to_string())
+}
+
+fn kiro_status() -> Result<String, String> {
+    let output = std::process::Command::new("docker")
+        
+        .args(["inspect", "-f", "{{.State.Running}}", KIRO_CONTAINER])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    let is_running = output.status.success() && 
+        String::from_utf8_lossy(&output.stdout).trim() == "true";
+    
+    if is_running {
+        Ok("🟢 Kiro session is running (Docker)".to_string())
+    } else {
+        Ok("🔴 Kiro session is not running. Use /kiro-start to start.".to_string())
+    }
+}
+
+fn kiro_log() -> Result<String, String> {
+    // Try to read from stored output file first
+    let output_file = "/tmp/kiro-last-output.txt";
+    if let Ok(content) = std::fs::read_to_string(output_file) {
+        if !content.is_empty() {
+            return Ok(format!("📋 Last Kiro output:\n```\n{}```", &content[..content.len().min(3000)]));
+        }
+    }
+    
+    // Fallback to docker logs
+    let output = std::process::Command::new("docker")
+        
+        .args(["logs", "--tail", "50", KIRO_CONTAINER])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        let logs = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        if logs.is_empty() {
+            return Ok("No output yet. Use /kiro <prompt> to start.".to_string());
+        }
+        Ok(format!("📋 Kiro logs:\n```\n{}```", &logs[..logs.len().min(2000)]))
+    } else {
+        Ok("No active Kiro session. Use /kiro <prompt> to start.".to_string())
+    }
+}
+
+fn kiro_kill() -> Result<String, String> {
+    let output = std::process::Command::new("docker")
+        
+        .args(["kill", KIRO_CONTAINER])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        Ok("🔴 Kiro session stopped.".to_string())
+    } else {
+        Ok("No session to stop.".to_string())
+    }
+}
+
+// Helper to strip ANSI escape codes from kiro output
+fn strip_ansi(s: &str) -> String {
+    let re = regex_lite::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    re.replace_all(s, "").to_string()
 }
 
 fn generate_javanese_greeting(bot_username: &str) -> String {
