@@ -1,223 +1,105 @@
-# carik-bot Roadmap to v1
+# carik-bot Roadmap
 
-## Overview
-A minimal, secure bot framework with clean architecture — inspired by OpenClaw but streamlined.
-
----
-
-## v1.0.0 Milestones
-
-### Phase 1: Core Architecture (Week 1-2)
-**Goal:** Establish clean architecture foundation
-
-```
-src/
-├── domain/           # Core business logic (no external deps)
-│   ├── entities/     # User, Message, Command, Plugin
-│   └── traits/       # abstractions (Bot trait, Store trait)
-├── application/     # Use cases
-│   ├── commands/     # CLI command handlers
-│   ├── services/     # Business logic services
-│   └── errors/       # Domain errors
-├── infrastructure/   # External concerns
-│   ├── config/       # Config loading (env, yaml, toml)
-│   ├── storage/      # File/JSON persistence
-│   └── http/         # HTTP client if needed
-└── presentation/     # CLI entry point
-    └── main.rs
-```
-
-**Deliverables:**
-- [ ] Project structure with clean architecture
-- [ ] Basic entity definitions
-- [ ] Error handling enum
-- [ ] Config loader (env + file)
+## Current Version: v0.1.0
 
 ---
 
-### Phase 2: Plugin System (Week 3)
-**Goal:** Hot-loadable skill/plugin system
+## Completed Features
 
-**Features:**
-- Plugin discovery from `plugins/` directory
-- Trait-based plugin interface
-- Sandboxed execution (optional: wasm, isolate)
-- Plugin metadata (`plugin.toml`)
+### ✅ Core Architecture
+- [x] Clean architecture (Domain, Application, Infrastructure)
+- [x] Telegram adapter with long polling
+- [x] Command system with prefix
+- [x] YAML + env config
+- [x] tracing-based logging
 
-**Security:**
-- Plugin permission system
-- No `unsafe` in plugins by default
-- Resource limits (time, memory)
+### ✅ User Management (RBAC)
+- [x] SQLite database (`carik-bot.db`)
+  - `users` table (telegram_id, username, role)
+  - `rate_limits` table (user_id, timestamp, query_type)
+- [x] Roles: owner, admin, user, guest
+- [x] `/connect` - Guest access request
+- [x] `/approve <id>` - Owner approves guests
+- [x] `/users` - User management (owner/admin)
 
-**Deliverables:**
-- [ ] `Plugin` trait definition
-- [ ] Plugin loader (dynamic `libloading`)
-- [ ] `plugin.toml` schema
-- [ ] Permission config
+### ✅ Rate Limiting
+- [x] 1 query per minute per user
+- [x] 20 queries per hour per user
+- [x] Owner exempt from rate limiting
 
----
+### ✅ Kiro Integration
+- [x] Docker container for kiro-cli (`kiro-persistent`)
+- [x] `/code` - Run kiro-cli as coding agent
+- [x] `/kiro` - Run kiro in Docker with chat
+- [x] `/kiro-status` - Check if running
+- [x] `/kiro-log` - View output
+- [x] `/kiro-kill` - Stop session
 
-### Phase 3: Message Handling (Week 4)
-**Goal:** Process incoming messages/commands
+### ✅ Workspace Management
+- [x] `/workspace` - Manage workspaces
+- [x] `.carik-bot/` home directory
+- [x] Multiple workspace support
 
-**Features:**
-- Message parsing (text, commands, callbacks)
-- Event-driven architecture
-- Middleware pipeline (auth → ratelimit → handler)
-- Response routing
-
-**Deliverables:**
-- [ ] Message types (Text, Command, Callback)
-- [ ] Middleware system (stackable)
-- [ ] Command dispatcher
-- [ ] Basic rate limiter
-
----
-
-### Phase 4: Platform Adapters + LLM Integration (Week 5)
-**Goal:** Support multiple messaging platforms and AI brain
-
-**Platform Adapters:**
-```
-infrastructure/
-└── adapters/
-    ├── telegram/
-    ├── discord/
-    └── console/
-```
-
-**LLM Integration:**
-- Unified LLM trait for multi-provider support
-- Built-in providers:
-  - [ ] **MiniMax** — Chinese AI (default)
-  - [ ] **Claude** — Anthropic
-  - [ ] **Groq** — Fast inference
-
-**LLM Architecture:**
-```
-infrastructure/
-└── llm/
-    ├── traits.rs      # LLM trait
-    ├── config.rs      # Provider config
-    └── providers/
-        ├── minimax.rs
-        ├── claude.rs
-        └── groq.rs
-```
-
-**Features:**
-- Streaming responses
-- Conversation context/memory
-- System prompt configuration
-- Token usage tracking
-- Fallback providers
-
-**Deliverables:**
-- [ ] Telegram adapter
-- [ ] Adapter trait
-- [ ] Platform-agnostic message conversion
-- [ ] LLM trait with unified API
-- [ ] MiniMax provider
-- [ ] Claude provider
-- [ ] Groq provider
-- [ ] Chat memory management
+### ✅ UI/UX
+- [x] Javanese greeting (`/start`)
+- [x] MarkdownV2 support for Telegram
+- [x] Typing indicator
+- [x] Fallback to plain text on errors
 
 ---
 
-### Phase 5: Security Hardening (Week 6)
-**Goal:** Outstanding security posture
+## In Progress
 
-**Security Features:**
-- [ ] Secrets management (no plain text tokens)
-- [ ] Input sanitization (XSS, injection)
-- [x] Rate limiting per user/chat
-- [x] Audit logging
-- [x] User Whitelist - Restrict bot access to specific Telegram users
-- [ ] TLS/HTTPS for webhooks
-- [ ] Plugin sandboxing (firejail or similar)
-
-**User Whitelist Configuration:**
-```yaml
-whitelist:
-  enabled: true
-  users:
-    - "6504720757"  # Your Telegram user ID
-    - "1234567890"  # Additional allowed users
-```
-
-When enabled, only users in the whitelist can interact with the bot. Unauthorized users receive an error message.
-
-**Security Config:**
-```yaml
-security:
-  rate_limit:
-    max_requests: 20
-    window_seconds: 60
-  sandbox:
-    enabled: true
-    memory_mb: 256
-  audit:
-    enabled: true
-    path: logs/audit.log
-```
+### 🔄 Telegram Polling Issue
+- Bot sometimes doesn't receive messages (409 Conflict)
+- Needs investigation
 
 ---
 
-### Phase 6: v1 Release (Week 7)
-**Goal:** Production-ready v1.0.0
+## Upcoming Features
 
-**Deliverables:**
+### v0.2.0 - User Management Enhanced
+- [ ] `/users add <id> <role>` - Add user with role
+- [ ] `/users remove <id>` - Remove user
+- [ ] Username tracking
+- [ ] User activity logging
+
+### v0.3.0 - LLM Enhancements
+- [ ] Conversation memory persistence
+- [ ] Multiple LLM providers (Claude, MiniMax)
+- [ ] Streaming responses
+
+### v1.0.0 - Production Release
+- [ ] Security audit
+- [ ] Docker container for bot
 - [ ] CI/CD pipeline
-- [ ] Docker container
-- [ ] Documentation
-- [ ] Versioning scheme
-- [ ] Changelog
+- [ ] Complete documentation
 
 ---
 
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   Presentation                       │
-│                  (CLI, main.rs)                      │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────┐
-│                   Application                       │
-│           (Commands, Services, Errors)              │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────┐
-│                     Domain                          │
-│            (Entities, Traits, Rules)                │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────┐
-│                  Infrastructure                     │
-│    (Config, Storage, Adapters, Security)           │
-└─────────────────────────────────────────────────────┘
-```
-
----
-
-## v1 Configuration Example
+## Configuration Example
 
 ```yaml
 bot:
   name: carik-bot
   prefix: "!"
 
-plugins:
-  directory: ./plugins
-  auto_load: true
+whitelist:
+  enabled: true
+  users:
+    - "6504720757"
+
+guests:
+  enabled: true
+  pending: []
+  approved: []
 
 security:
   rate_limit:
     max_requests: 20
     window_seconds: 60
   sandbox:
-    enabled: true
+    enabled: false
 
 adapters:
   telegram:
@@ -227,100 +109,43 @@ adapters:
 
 ---
 
-## Dependencies (Recommended)
+## Database Schema
 
-```toml
-[dependencies]
-# CLI
-clap = { version = "4", features = ["derive"] }
+```sql
+-- Users table
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id TEXT UNIQUE NOT NULL,
+    username TEXT,
+    role TEXT NOT NULL DEFAULT 'guest',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
-# Async
-tokio = { version = "1", features = ["full"] }
-
-# Config
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
-config = "0.14"
-
-# Plugin system
-libloading = "0.8"
-
-# Security
-ring = "0.17"
-rustls = "0.23"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = "0.3"
-
-# Utils
-thiserror = "1"
-async-trait = "0.1"
+-- Rate limits table
+CREATE TABLE rate_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    timestamp TEXT NOT NULL,
+    query_type TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
 ```
 
 ---
 
-## Next Steps
+## Commands Matrix
 
-1. **Approve architecture** — Confirm structure above
-2. **Start Phase 1** — Set up clean architecture folders
-3. **Define entities** — What does the bot manipulate?
-
-Let me know when ready to start! 🚀
-
----
-
-## Phase 5.5: Skills & OpenClaw Compatibility (Week 6.5)
-**Goal:** Add skill system compatible with OpenClaw format
-
-**Skills Structure:**
-```
-skills/
-├── help/         # Help and skill management
-├── weather/      # Weather queries (wttr.in)
-├── github/      # Git operations
-├── quotes/      # Inspirational quotes
-└── ...
-    └── SKILL.md  # OpenClaw-compatible skill definition
-```
-
-**Skill Format (OpenClaw-compatible):**
-```yaml
----
-name: carik-skill-name
-description: Brief description of the skill
-metadata:
-  {
-    "carik": { "emoji": "🔧", "requires": {} },
-    "openclaw": { "emoji": "🔧", "requires": { "bins": ["curl"] } }
-  }
----
-
-# Skill Name
-
-Description and usage examples.
-
-## Usage
-
-```
-User: /command
-Carik: Response
-```
-```
-
-**Features:**
-- [x] Skill directory structure
-- [x] YAML frontmatter metadata
-- [x] OpenClaw-compatible format
-- [x] Emoji support
-- [x] Requirements specification
-- [x] Help skill
-- [x] Weather skill
-- [x] GitHub skill
-- [x] Quotes skill
-
-**OpenClaw Compatibility:**
-- Same `SKILL.md` format
-- YAML frontmatter with metadata
-- Usage examples in code blocks
-- Cross-referenced emoji support
+| Command | Owner | Admin | User | Guest |
+|---------|-------|-------|------|-------|
+| /start | ✅ | ✅ | ✅ | ✅ |
+| /help | ✅ | ✅ | ✅ | ✅ |
+| /ping | ✅ | ✅ | ✅ | ✅ |
+| /about | ✅ | ✅ | ✅ | ✅ |
+| /clear | ✅ | ✅ | ✅ | ✅ |
+| /quote | ✅ | ✅ | ✅ | ✅ |
+| /connect | - | - | - | ✅ |
+| /approve | ✅ | ❌ | ❌ | ❌ |
+| /users | ✅ | ✅ | ❌ | ❌ |
+| /workspace | ✅ | ✅ | ✅ | ✅ |
+| /code | ✅ | ✅ | ✅ | ❌ |
+| /kiro | ✅ | ✅ | ✅ | ❌ |

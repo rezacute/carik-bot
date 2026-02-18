@@ -93,3 +93,32 @@ sudo systemctl restart carik-bot
 - `ProtectSystem=strict` mounts `/usr`, `/boot`, `/etc` as read-only
 - `ReadWritePaths` explicitly allows write access to logs directory
 - Running as non-root `ubuntu` user limits blast radius
+
+## Docker for Kiro
+
+Kiro CLI runs in a Docker container (`kiro-persistent`) for isolation:
+
+```bash
+# Start container
+docker run -d --name kiro-persistent \
+  -v /home/ubuntu/.kiro:/root/.kiro \
+  -v /home/ubuntu/.local/share/kiro-cli:/root/.local/share/kiro-cli \
+  -v /home/ubuntu/.carik-bot:/workspace \
+  -v /home/ubuntu/.local/bin/kiro-cli:/usr/local/bin/kiro-cli \
+  -v /home/ubuntu/.aws:/root/.aws \
+  -e PATH="/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  -e AWS_ACCESS_KEY_ID=... \
+  -e AWS_SECRET_ACCESS_KEY=... \
+  -e AWS_REGION=ap-southeast-1 \
+  --workdir /workspace \
+  ubuntu:latest sleep infinity
+
+# Check container
+docker ps | grep kiro-persistent
+
+# View logs
+docker logs kiro-persistent
+
+# Restart container
+docker restart kiro-persistent
+```
