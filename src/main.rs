@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 mod domain;
 mod application;
 mod infrastructure;
+mod plugins;
 
 use infrastructure::config::Config;
 use infrastructure::database;
@@ -15,6 +16,7 @@ use infrastructure::adapters::console::ConsoleAdapter;
 use infrastructure::llm::{LLM, GroqProvider, LLMMessage};
 use application::services::CommandService;
 use domain::traits::Bot;
+use plugins::{PluginManager, trait_def::ExtendedPluginConfig};
 
 // Global database instance
 static DB: Lazy<Mutex<Option<database::Database>>> = Lazy::new(|| Mutex::new(None));
@@ -105,6 +107,20 @@ fn run_bot(config_path: String, token_override: Option<String>) {
             }
         }
     }
+    
+    // Initialize plugin system
+    let plugin_config = ExtendedPluginConfig {
+        enabled: true,
+        plugins_dir: config.plugins.directory.to_str().map(|s| s.to_string()),
+        mcp: None,  // Phase 2
+        a2a: None,  // Phase 3
+        wasm: None, // Phase 4
+    };
+    let mut plugin_manager = PluginManager::new(plugin_config);
+    if let Err(e) = plugin_manager.load_from_config() {
+        tracing::warn!("Failed to load plugins: {}", e);
+    }
+    tracing::info!("Plugin system initialized with {} plugins", plugin_manager.list_plugins().len());
 
     // Initialize command service
     let mut commands = CommandService::new(&config.bot.prefix);
