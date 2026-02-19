@@ -1520,21 +1520,36 @@ fn clean_kiro_output(s: &str) -> String {
 const RATE_LIMIT_PER_MINUTE: i64 = 1;
 const RATE_LIMIT_PER_HOUR: i64 = 20;
 
+/// Get owner ID from environment variable
+fn get_owner_id() -> Option<String> {
+    std::env::var("BOT_OWNER_ID").ok()
+}
+
+/// Check if user is owner (from env var)
+fn is_owner(user_id: &str) -> bool {
+    if let Some(owner_id) = get_owner_id() {
+        return owner_id == user_id;
+    }
+    // Fallback to config
+    if let Ok(config) = Config::load("config.yaml") {
+        return config.whitelist.enabled && config.whitelist.users.contains(&user_id.to_string());
+    }
+    false
+}
+
 /// Check if user is allowed based on role
 fn get_user_role(user_id: &str) -> String {
-    // First check database
+    // First check if owner (from env var) - highest priority
+    if is_owner(user_id) {
+        return "owner".to_string();
+    }
+    
+    // Then check database
     if let Ok(db_guard) = DB.lock() {
         if let Some(db) = db_guard.as_ref() {
             if let Ok(Some(user)) = db.get_user_by_telegram_id(user_id) {
                 return user.role;
             }
-        }
-    }
-    
-    // Fallback to config whitelist for owner
-    if let Ok(config) = Config::load("config.yaml") {
-        if config.whitelist.enabled && config.whitelist.users.contains(&user_id.to_string()) {
-            return "owner".to_string();
         }
     }
     
@@ -1648,9 +1663,14 @@ fn register_users_command(commands: &mut CommandService) {
                     let target_id = parts[1];
                     let role = parts[2];
                     
-                    // Validate role
-                    if !["owner", "admin", "user", "guest"].contains(&role) {
-                        return Ok("Invalid role. Use: owner, admin, user, guest".to_string());
+                    // Prevent adding owner role - owner can only be set via BOT_OWNER_ID env var
+                    if role == "owner" {
+                        return Ok("❌ Cannot add owner role. Owner is set via BOT_OWNER_ID environment variable.".to_string());
+                    }
+                    
+                    // Check if target is owner (from env)
+                    if is_owner(target_id) {
+                        return Ok("❌ Cannot modify owner (set via BOT_OWNER_ID env var).".to_string());
                     }
                     
                     let db_guard = DB.lock().unwrap();
@@ -1668,6 +1688,11 @@ fn register_users_command(commands: &mut CommandService) {
                         return Ok("Usage: /users remove <telegram_id>".to_string());
                     }
                     let target_id = parts[1];
+                    
+                    // Check if target is owner (from env)
+                    if is_owner(target_id) {
+                        return Ok("❌ Cannot remove owner (set via BOT_OWNER_ID env var).".to_string());
+                    }
                     
                     let db_guard = DB.lock().unwrap();
                     if let Some(db) = db_guard.as_ref() {
@@ -1703,7 +1728,35 @@ fn register_users_command(commands: &mut CommandService) {
                         Ok("Database not initialized".to_string())
                     }
                 }
-                _ => Ok("Usage: /users <list|add|remove|info> [args]".to_string())
+                Some("setrole") | Some("role") => {
+                    if parts.len() < 3 {
+                        return Ok("Usage: /users setrole <telegram_id> <role>\nRoles: owner, admin, user, guest".to_string());
+                    }
+                    let target_id = parts[1];
+                    let new_role = parts[2];
+                    
+                    // Prevent setting owner role - owner can only be set via BOT_OWNER_ID env var
+                    if new_role == "owner" {
+                        return Ok("❌ Cannot set owner role. Owner is set via BOT_OWNER_ID environment variable.".to_string());
+                    }
+                    
+                    // Check if target is owner (from env)
+                    if is_owner(target_id) {
+                        return Ok("❌ Cannot modify owner role (set via BOT_OWNER_ID env var).".to_string());
+                    }
+                    
+                    let db_guard = DB.lock().unwrap();
+                    if let Some(db) = db_guard.as_ref() {
+                        match db.update_user_role(target_id, new_role) {
+                            Ok(true) => Ok(format!("✅ User {} role updated to {}", target_id, new_role)),
+                            Ok(false) => Ok(format!("User {} not found", target_id)),
+                            Err(e) => Ok(format!("Error: {}", e))
+                        }
+                    } else {
+                        Ok("Database not initialized".to_string())
+                    }
+                }
+                _ => Ok("Usage: /users <list|add|remove|info|setrole> [args]".to_string())
             }
         }));
 }

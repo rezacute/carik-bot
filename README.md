@@ -133,22 +133,49 @@ guests:
 ```bash
 BOT_TOKEN=your_telegram_bot_token_here
 GROQ_API_KEY=your_groq_api_key_here
+BOT_OWNER_ID=your_telegram_user_id  # Owner user ID (required)
 ```
 
 ## User Management
 
 ### Roles
 
-- **owner** - Full access, can manage users
+- **owner** - Full access, can manage users (set via `BOT_OWNER_ID` env var)
 - **admin** - Can manage users, all commands
 - **user** - Regular access
 - **guest** - Limited, needs approval
+
+### Owner Setup
+
+Set the owner via environment variable:
+```bash
+# In systemd
+sudo systemctl set-environment BOT_OWNER_ID=6504720757
+sudo systemctl restart carik-bot
+```
+
+Or add to `/etc/environment`:
+```
+BOT_OWNER_ID=6504720757
+```
+
+The owner cannot be modified by other users - it's protected.
+
+### User Commands
+
+| Command | Description |
+|---------|-------------|
+| `/users list` | List all users |
+| `/users add <id> <role>` | Add user (admin, user, guest) |
+| `/users remove <id>` | Remove user |
+| `/users info <id>` | Get user info |
+| `/users setrole <id> <role>` | Change user role |
 
 ### Flow
 
 1. **Guest** sends `/connect` → request goes to pending
 2. **Owner** runs `/approve <user_id>` → user approved
-3. **Approved user** can use `/code` and `/kiro`
+3. **Owner** runs `/users add <id> user` → user added with role
 
 ### Rate Limiting
 
