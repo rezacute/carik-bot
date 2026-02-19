@@ -464,3 +464,120 @@ impl McpServer for WeatherMcpServer {
     }
 }
 ```
+
+---
+
+## 10. LLM Integration (Butler Service)
+
+### Overview
+Plugins integrate with the LLM so it knows its capabilities and can acknowledge plugin results.
+
+### Plugin Context Provider
+
+```rust
+pub struct PluginContextProvider {
+    manager: SharedPluginManager,
+}
+
+impl PluginContextProvider {
+    /// Get available plugins as context string for LLM
+    pub fn get_context(&self) -> String {
+        let plugins = self.manager.list_plugins();
+        
+        if plugins.is_empty() {
+            return String::new();
+        }
+        
+        let mut ctx = "## Available Butler Tools\n\n".to_string();
+        
+        for plugin in &plugins {
+            ctx.push_str(&format!(
+                "### {}\n{}\n",
+                plugin.name,
+                plugin.description
+            ));
+            
+            if !plugin.commands.is_empty() {
+                ctx.push_str("Commands:\n");
+                for cmd in &plugin.commands {
+                    ctx.push_str(&format!("- /{}: {}\n", cmd.name, cmd.description));
+                }
+            }
+            ctx.push('\n');
+        }
+        
+        ctx
+    }
+    
+    /// Format plugin result for LLM acknowledgment
+    pub fn format_result(&self, plugin: &str, result: &PluginResult) -> String {
+        match &result.output {
+            Ok(output) => format!(
+                "[Butler Tool '{}' executed]\n{}\n[End result]\n\nAcknowledge this to the user and integrate naturally.",
+                plugin,
+                serde_json::to_string_pretty(output).unwrap_or_default()
+            ),
+            Err(e) => format!(
+                "[Butler Tool '{}' error: {}]\n\nAcknowledge the issue and suggest alternatives.",
+                plugin,
+                e
+            ),
+        }
+    }
+}
+```
+
+### Butler System Prompt
+
+```
+## Butler Service Mode
+
+You are Carik, a helpful personal assistant. You have access to tools (plugins) 
+that extend your capabilities.
+
+When using a tool:
+1. Tell the user what you're doing
+2. Use the tool
+3. Acknowledge the result
+4. Integrate it naturally into your response
+
+Example:
+User: "Get me the latest news"
+You: "I'll fetch the latest news for you." [RSS tool]
+[RSS returns headlines]
+You: "Here's the latest news: 1. Headline one... 2. Headline two..."
+```
+
+### Intent Detection for Auto-Routing
+
+```rust
+/// Detect if user wants a plugin and extract args
+pub fn detect_plugin_intent(text: &str) -> Option<(String, Value)> {
+    let lower = text.to_lowercase();
+    
+    // RSS patterns
+    if lower.contains("news") || lower.contains("headlines") || lower.contains("feed") {
+        return Some(("rss", json!({})));
+    }
+    
+    // More patterns...
+    None
+}
+```
+
+### Updated Message Flow
+
+```
+User Message
+    ↓
+Is it a command? → Yes → Execute command
+    ↓ No
+Detect plugin intent → Match → Execute plugin → Acknowledge & integrate result
+    ↓ No match
+Is it coding? → Yes → Route to Kiro
+    ↓ No
+Is it a skill? → Yes → Load skill.md → Execute
+    ↓ No
+Route to LLM (with plugin context)
+```
+```

@@ -325,7 +325,7 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                 }
                             } else {
                                 // Auto-route: detect intent and route to appropriate handler
-                                match route_message(&text, &llm, &system_prompt).await {
+                                match route_message(&text, &chat_id, &mut conversations, &llm, &system_prompt).await {
                                     Some(resp) => {
                                         // Send response
                                         tracing::info!("Sending response to chat_id {}: {}", chat_id, &resp[..resp.len().min(100)]);
@@ -730,6 +730,17 @@ fn is_coding_intent(text: &str) -> bool {
     coding_keywords.iter().any(|kw| lower.contains(kw))
 }
 
+/// Detect if user message is asking for news/RSS
+fn is_rss_intent(text: &str) -> bool {
+    let rss_keywords = [
+        "news", "headlines", "latest", "feed", "rss",
+        "berita", "headline", "update", "breaking",
+    ];
+    
+    let lower = text.to_lowercase();
+    rss_keywords.iter().any(|kw| lower.contains(kw))
+}
+
 /// Detect if user message is asking for a skill/tool
 fn detect_skill(text: &str) -> Option<String> {
     let skill_keywords = [
@@ -749,8 +760,289 @@ fn detect_skill(text: &str) -> Option<String> {
     None
 }
 
-/// Route message to appropriate handler
-async fn route_message(text: &str, llm: &Option<GroqProvider>, system_prompt: &str) -> Option<String> {
+/// Detect if user is responding to news selection and extract source
+fn detect_news_source(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    
+    // Map keywords to RSS URLs
+    let sources = [
+        (vec!["yahoo", "yahoo news"], "https://news.yahoo.com/rss/topstories"),
+        (vec!["google", "google news"], "https://news.google.com/rss"),
+        (vec!["bbc", "bbc news"], "http://feeds.bbci.co.uk/news/rss.xml"),
+        (vec!["techcrunch"], "https://techcrunch.com/feed/"),
+        (vec!["hn", "hacker news", "hackernews"], "https://hnrss.org/newest"),
+        (vec!["cna", "channel newsasia", "channelnewsasia"], "https://www.channelnewsasia.com/rss"),
+        (vec!["reuters"], "https://www.reutersagency.com/feed/"),
+        (vec!["bbc world"], "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ];
+    
+    for (keywords, _url) in sources {
+        for kw in keywords {
+            if lower.contains(kw) {
+                return Some(kw.to_string());
+            }
+        }
+    }
+    
+    None
+}
+
+/// Detect topic/country from news query and return (topic_name, rss_url)
+fn detect_news_topic(text: &str) -> Option<(String, String)> {
+    let lower = text.to_lowercase();
+    
+    // G20 Countries RSS feeds
+    let topic_sources = [
+        // G20 Countries
+        (vec!["argentina", "argentine"], "Argentina", "https://www.batimes.com.ar/feed"),
+        (vec!["australia", "australian"], "Australia", "https://www.abc.net.au/news/feed/45910/rss.xml"),
+        (vec!["brazil", "brazilian"], "Brazil", "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml"),
+        (vec!["canada", "canadian"], "Canada", "https://www.cbc.ca/cmlink/rss-topstories"),
+        (vec!["china", "chinese"], "China", "https://www.scmp.com/rss/91/feed"),
+        (vec!["france", "french"], "France", "https://www.france24.com/en/rss"),
+        (vec!["germany", "german", "deutsch"], "Germany", "https://rss.dw.com/rdf/rss-en-all"),
+        (vec!["india", "indian"], "India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
+        (vec!["indonesia", "indonesian"], "Indonesia", "https://en.antaranews.com/rss/news.xml"),
+        (vec!["italy", "italian"], "Italy", "https://www.agi.it/rss"),
+        (vec!["japan", "japanese"], "Japan", "https://www.japantimes.co.jp/feed"),
+        (vec!["mexico", "mexican"], "Mexico", "https://www.eluniversal.com.mx/rss.xml"),
+        (vec!["russia", "russian"], "Russia", "https://www.rt.com/rss/news/"),
+        (vec!["saudi", "saudi arabia"], "Saudi Arabia", "https://www.arabnews.com/rss.xml"),
+        (vec!["south africa"], "South Africa", "https://mg.co.za/feed/"),
+        (vec!["korea", "south korean", "korean"], "South Korea", "https://en.yna.co.kr/RSS/news.xml"),
+        (vec!["turkey", "turkish"], "Turkey", "https://www.hurriyet.com.tr/rss/anasayfa"),
+        (vec!["uk", "britain", "british", "england"], "UK", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+        (vec!["us", "usa", "america", "american", "united states"], "USA", "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"),
+        (vec!["eu", "europe", "european"], "EU", "https://www.euronews.com/rss?level=vertical&name=news"),
+        
+        // Southeast Asia
+        (vec!["singapore", "singaporean"], "Singapore", "https://www.straitstimes.com/news/world/rss.xml"),
+        (vec!["malaysia", "malaysian"], "Malaysia", "https://www.thestar.com.my/rss/news/nation"),
+        (vec!["vietnam", "vietnamese"], "Vietnam", "https://vietnamnews.vn/rss/politics.rss"),
+        (vec!["thailand", "thai"], "Thailand", "https://www.bangkokpost.com/rss/data/topstories.xml"),
+        (vec!["philippines", "philippine", "filipino"], "Philippines", "https://www.inquirer.net/fullfeed"),
+        (vec!["myanmar", "burmese"], "Myanmar", "https://www.irrawaddy.com/feed"),
+        (vec!["cambodia", "cambodian"], "Cambodia", "https://www.khmertimeskh.com/feed/"),
+        
+        // South & Central Asia
+        (vec!["pakistan", "pakistani"], "Pakistan", "https://www.dawn.com/feeds/home/"),
+        (vec!["bangladesh", "bangladeshi"], "Bangladesh", "https://www.thedailystar.net/rss.xml"),
+        (vec!["sri lanka", "sri lankan"], "Sri Lanka", "https://www.dailymirror.lk/rss/news"),
+        (vec!["nepal", "nepalese"], "Nepal", "https://kathmandupost.com/rss"),
+        (vec!["kazakhstan", "kazakh"], "Kazakhstan", "https://www.inform.kz/en/rss"),
+        (vec!["uzbekistan", "uzbek"], "Uzbekistan", "https://uzreport.news/rss"),
+        
+        // East Asia & Middle East (Non-G20)
+        (vec!["taiwan", "taiwanese"], "Taiwan", "https://focustaiwan.tw/rss/get-rss.aspx?type=aall"),
+        (vec!["israel", "israeli"], "Israel", "https://www.haaretz.com/cmlink/1.4621118"),
+        (vec!["uae", "united arab emirates", "dubai"], "UAE", "https://gulfnews.com/rss"),
+        (vec!["qatar", "qatari"], "Qatar", "https://www.aljazeera.com/xml/rss/all.xml"),
+        (vec!["iran", "iranian"], "Iran", "https://en.mehrnews.com/rss"),
+        (vec!["mongolia", "mongolian"], "Mongolia", "https://www.montsame.mn/en/rss"),
+        (vec!["north korea", "north korean"], "North Korea", "https://www.kcna.watch/feed/"),
+        
+        // Topics
+        (vec!["technology", "tech"], "Technology", "https://techcrunch.com/feed/"),
+        (vec!["business", "finance", "economy"], "Business", "https://news.yahoo.com/rss/business"),
+        (vec!["sports", "sport"], "Sports", "https://news.yahoo.com/rss/sports"),
+        (vec!["entertainment", "movie", "film"], "Entertainment", "https://news.yahoo.com/rss/entertainment"),
+    ];
+    
+    for (keywords, display, url) in topic_sources {
+        for kw in keywords {
+            if lower.contains(kw) {
+                return Some((display.to_string(), url.to_string()));
+            }
+        }
+    }
+    
+    None
+}
+
+/// Check if conversation is about news (has RSS context)
+fn is_news_conversation(conversation: &[LLMMessage]) -> bool {
+    for msg in conversation {
+        if msg.role == "assistant" && msg.content.contains("news source") || 
+           msg.content.contains("RSS feed") || msg.content.contains("Which source") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Route message to appropriate handler with conversation history
+async fn route_message(
+    text: &str, 
+    chat_id: &str, 
+    conversations: &mut std::collections::HashMap<String, Vec<LLMMessage>>, 
+    llm: &Option<GroqProvider>, 
+    system_prompt: &str
+) -> Option<String> {
+    // Get or create conversation history for this chat
+    let conversation = conversations.entry(chat_id.to_string()).or_insert_with(Vec::new);
+    
+    // Keep conversation history limited (last 10 messages)
+    if conversation.len() > 20 {
+        conversation.remove(0);
+        conversation.remove(0);
+    }
+    
+    // Check if user is responding to news selection
+    if is_news_conversation(conversation) {
+        if let Some(source) = detect_news_source(text) {
+            tracing::info!("Detected news source selection: {}, fetching RSS", source);
+            
+            // Map source to URL
+            let url = match source.as_str() {
+                "yahoo" | "yahoo news" => "https://news.yahoo.com/rss/topstories",
+                "google" | "google news" => "https://news.google.com/rss",
+                "bbc" | "bbc news" => "http://feeds.bbci.co.uk/news/rss.xml",
+                "bbc world" => "http://feeds.bbci.co.uk/news/world/rss.xml",
+                "techcrunch" => "https://techcrunch.com/feed/",
+                "hn" | "hacker news" | "hackernews" => "https://hnrss.org/newest",
+                "cna" | "channel newsasia" | "channelnewsasia" => "https://www.channelnewsasia.com/rss",
+                "reuters" => "https://www.reutersagency.com/feed/",
+                _ => "https://news.yahoo.com/rss/topstories",
+            };
+            
+            // Fetch RSS and use LLM to summarize
+            let rss_content = fetch_rss_feed_blocking(url);
+            
+            // Format response with source name
+            let source_display = source.replace("yahoo news", "Yahoo News")
+                .replace("google news", "Google News")
+                .replace("bbc news", "BBC News")
+                .replace("channel newsasia", "Channel NewsAsia")
+                .replace("channelnewsasia", "Channel NewsAsia")
+                .replace("hacker news", "Hacker News")
+                .replace("hackernews", "Hacker News");
+            
+            let header = format!("📰 *{} News*\n\n", source_display);
+            
+            // Use LLM to summarize
+            if let Some(ref llm) = llm {
+                let summarize_prompt = format!(
+                    "You're a news reporter. Summarize these headlines in a friendly, conversational way (2-3 sentences, then bullet points). MUST include the article URL after each headline like this: Headline Title\n🔗 https://example.com\n\n{}",
+                    rss_content
+                );
+                
+                let messages = vec![
+                    LLMMessage::system(system_prompt),
+                    LLMMessage::user(&summarize_prompt),
+                ];
+                
+                match llm.chat(messages, None, Some(0.7), None).await {
+                    Ok(response) => {
+                        let final_response = format!("{}{}", header, response.content);
+                        conversation.push(LLMMessage::user(text.to_string()));
+                        conversation.push(LLMMessage::assistant(final_response.clone()));
+                        return Some(final_response);
+                    }
+                    Err(_) => {
+                        // Fallback to raw
+                    }
+                }
+            }
+            
+            // Fallback to raw feed
+            let response = format!("📰 *{}*\n\n{}", source_display, rss_content);
+            conversation.push(LLMMessage::user(text.to_string()));
+            conversation.push(LLMMessage::assistant(response.clone()));
+            return Some(response);
+        }
+    }
+    
+    // Check for RSS/news intent - fetch and summarize
+    if is_rss_intent(text) {
+        tracing::info!("Detected RSS intent, fetching and summarizing news");
+        
+        // Detect topic (e.g., India, Indonesia, technology) - includes specific RSS URL
+        let topic = detect_news_topic(text);
+        
+        // Check if user specified a source explicitly
+        let explicit_source = detect_news_source(text);
+        
+        // Determine URL: topic-specific > explicit source > default
+        let (url, source_display) = if let Some((topic_name, topic_url)) = &topic {
+            // Use topic's RSS source
+            (topic_url.clone(), topic_name.clone())
+        } else if let Some(source) = explicit_source {
+            let url = match source.as_str() {
+                "yahoo" | "yahoo news" => "https://news.yahoo.com/rss/topstories",
+                "google" | "google news" => "https://news.google.com/rss",
+                "bbc" | "bbc news" => "http://feeds.bbci.co.uk/news/rss.xml",
+                "bbc world" => "http://feeds.bbci.co.uk/news/world/rss.xml",
+                "techcrunch" => "https://techcrunch.com/feed/",
+                "hn" | "hacker news" | "hackernews" => "https://hnrss.org/newest",
+                "cna" | "channel newsasia" | "channelnewsasia" => "https://www.channelnewsasia.com/rss",
+                "reuters" => "https://www.reutersagency.com/feed/",
+                _ => "https://news.yahoo.com/rss/topstories",
+            };
+            let display = source.replace("yahoo news", "Yahoo News")
+                .replace("google news", "Google News")
+                .replace("bbc news", "BBC News")
+                .replace("channel newsasia", "Channel NewsAsia")
+                .replace("channelnewsasia", "Channel NewsAsia")
+                .replace("hacker news", "Hacker News")
+                .replace("hackernews", "Hacker News");
+            (url.to_string(), display)
+        } else {
+            ("https://news.yahoo.com/rss/topstories".to_string(), "Yahoo News".to_string())
+        };
+        
+        // Fetch RSS content
+        let rss_content = fetch_rss_feed_blocking(&url);
+        
+        // Build header with topic if detected (needed for error case too)
+        let header = if let Some((topic_name, _)) = &topic {
+            format!("📰 *Latest {} News*\n\n", topic_name)
+        } else {
+            format!("📰 *Latest {} News*\n\n", source_display)
+        };
+        
+        // Check if RSS fetch failed - if so, return error directly without LLM
+        if rss_content.starts_with("❌") {
+            let error_response = format!("{}Sorry, couldn't fetch the news feed. Please try again or try a different source like /rss google\n\nError: {}", header, rss_content);
+            conversation.push(LLMMessage::user(text.to_string()));
+            conversation.push(LLMMessage::assistant(error_response.clone()));
+            return Some(error_response);
+        }
+        
+        // Use LLM to summarize
+        if let Some(ref llm) = llm {
+            let topic_hint = topic.as_ref().map(|(t, _)| format!(" Focus on {} news.", t)).unwrap_or_default();
+            let summarize_prompt = format!(
+                "You're a news reporter. Summarize these headlines in a friendly, conversational way (2-3 sentences max, then bullet points). MUST include the article URL after each headline like this: Headline Title\n🔗 https://example.com{}\n\nHeadlines:\n{}",
+                topic_hint, rss_content
+            );
+            
+            let messages = vec![
+                LLMMessage::system(system_prompt),
+                LLMMessage::user(&summarize_prompt),
+            ];
+            
+            match llm.chat(messages, None, Some(0.7), None).await {
+                Ok(response) => {
+                    let final_response = format!("{}{}", header, response.content);
+                    conversation.push(LLMMessage::user(text.to_string()));
+                    conversation.push(LLMMessage::assistant(final_response.clone()));
+                    return Some(final_response);
+                }
+                Err(e) => {
+                    // Fallback to raw feed on error
+                    let fallback = format!("{}{}", header, rss_content);
+                    return Some(fallback);
+                }
+            }
+        }
+        
+        // No LLM - return raw feed
+        let response = format!("{}{}", header, rss_content);
+        conversation.push(LLMMessage::user(text.to_string()));
+        conversation.push(LLMMessage::assistant(response.clone()));
+        return Some(response);
+    }
+    
     // Check for coding intent
     if is_coding_intent(text) {
         tracing::info!("Detected coding intent, routing to Kiro");
@@ -765,15 +1057,22 @@ async fn route_message(text: &str, llm: &Option<GroqProvider>, system_prompt: &s
         return Some(format!("Skill '{}' detected. Skill execution coming soon!", skill));
     }
     
-    // Route to LLM
+    // Route to LLM with conversation history
     if let Some(ref llm) = llm {
-        tracing::info!("Routing to LLM");
-        let messages = vec![
-            LLMMessage::system(system_prompt),
-            LLMMessage::user(text),
-        ];
-        match llm.chat(messages, None, Some(0.7), None).await {
-            Ok(response) => return Some(response.content),
+        tracing::info!("Routing to LLM with history");
+        
+        // Build messages with history
+        let mut messages = conversation.clone();
+        messages.push(LLMMessage::system(system_prompt));
+        messages.push(LLMMessage::user(text));
+        
+        match llm.chat(messages.clone(), None, Some(0.7), None).await {
+            Ok(response) => {
+                // Add to conversation history
+                conversation.push(LLMMessage::user(text.to_string()));
+                conversation.push(LLMMessage::assistant(response.content.clone()));
+                return Some(response.content);
+            }
             Err(e) => return Some(format!("LLM Error: {}", e)),
         }
     }

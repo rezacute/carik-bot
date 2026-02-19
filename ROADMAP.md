@@ -46,6 +46,19 @@
 - [x] Typing indicator
 - [x] Fallback to plain text on errors
 
+### ✅ Plugin Architecture
+- [x] Plugin trait and manager
+- [x] MCP placeholder
+- [x] A2A placeholder
+- [x] RSS plugin with /rss command
+
+### ✅ Butler Service (LLM Integration)
+- [x] Plugin context provider for LLM
+- [x] Butler system prompt
+- [x] Config: butler section
+- [x] Intent detection for auto-routing
+- [x] Plugin result acknowledgment
+
 ---
 
 ## In Progress
@@ -149,3 +162,4 @@ CREATE TABLE rate_limits (
 | /workspace | ✅ | ✅ | ✅ | ✅ |
 | /code | ✅ | ✅ | ✅ | ❌ |
 | /kiro | ✅ | ✅ | ✅ | ❌ |
+| /rss | ✅ | ✅ | ✅ | ❌ |
