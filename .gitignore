@@ -18,3 +18,7 @@ Thumbs.db
 # Optional
 Cargo.lock
 config.yaml
+
+# Bot data
+*.db
+*.db-journal

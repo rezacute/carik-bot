@@ -23,16 +23,14 @@ security:
 adapters:
   telegram:
     enabled: true
-    token: 8492929647:AAEx3Tmaw5J_l_byUEKhXYrQJAZRuIPDVWc
+    token: YOUR_BOT_TOKEN_HERE
   console:
     enabled: false
 whitelist:
   enabled: true
   users:
-  - '6504720757'
-  - '148018638'
+  - YOUR_TELEGRAM_ID
 guests:
   enabled: true
   pending: []
-  approved:
-  - '148018638'
+  approved: []
