@@ -59,6 +59,13 @@
 - [x] Intent detection for auto-routing
 - [x] Plugin result acknowledgment
 
+### ✅ RSS News
+- [x] `/rss` command with presets
+- [x] Country-specific RSS feeds (40+ countries)
+- [x] Topic detection (India, Indonesia, Korea, etc.)
+- [x] LLM summarization with URLs
+- [x] Natural language: "news about [country]"
+
 ---
 
 ## In Progress

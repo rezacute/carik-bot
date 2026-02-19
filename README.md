@@ -12,12 +12,14 @@
 
 - 🤖 **Telegram Integration** — Long polling Bot API support
 - 🧠 **LLM Integration** — Groq-powered AI responses with conversation memory
+- 📰 **RSS News** — Fetch and summarize news from 40+ country feeds
 - 🎯 **Command System** — Prefix-based commands with help auto-generation
 - 🔐 **RBAC** — Owner/Admin/User/Guest roles with SQLite database
 - 📊 **Rate Limiting** — 1 query/minute, 20 queries/hour per user
 - 🔌 **Docker Support** — Kiro CLI runs in Docker container for isolation
 - 🏗️ **Clean Architecture** — Domain, Application, Infrastructure layers
 - ⚙️ **Config Management** — YAML + environment variables
+- 🔌 **Plugin System** — MCP/A2A/Wasm plugin architecture (in progress)
 
 ## Commands
 
@@ -33,23 +35,40 @@
 | `/approve <id>` | Approve guest (owner) | Owner |
 | `/users` | Manage users | Owner/Admin |
 | `/workspace` | Manage workspaces | All |
+| `/rss [source]` | Fetch RSS news | Approved |
+
+### RSS News Sources
+
+**Just say "news about [country]" and the bot will fetch and summarize!**
+
+| Country | Keywords |
+|---------|----------|
+| Argentina | argentina |
+| Australia | australia |
+| Brazil | brazil |
+| Canada | canada |
+| China | china |
+| France | france |
+| Germany | germany |
+| India | india |
+| Indonesia | indonesia |
+| Italy | italy |
+| Japan | japan |
+| Mexico | mexico |
+| Russia | russia |
+| Saudi Arabia | saudi |
+| South Africa | south africa |
+| South Korea | korea |
+| Turkey | turkey |
+| UK | uk, britain |
+| USA | usa, america |
+| EU | eu, europe |
+
+Plus: Singapore, Malaysia, Vietnam, Thailand, Philippines, Myanmar, Cambodia, Pakistan, Bangladesh, Sri Lanka, Nepal, Kazakhstan, Uzbekistan, Taiwan, Israel, UAE, Qatar, Iran, Mongolia, North Korea
+
+Topics: technology, business, sports, entertainment
 
 ### Kiro Commands (AI Agent in Docker)
-
-| Command | Description | Access |
-|---------|-------------|--------|
-| `/kiro <prompt>` | Run kiro with prompt | Approved |
-| `/kiro-status` | Check if kiro running | Approved |
-| `/kiro-log` | View last output | Approved |
-| `/kiro-kill` | Stop kiro session | Approved |
-| `/kiro-new` | Start new conversation | Approved |
-| `/kiro-ls` | List workspace files | Approved |
-| `/kiro-read <file>` | Read file | Approved |
-| `/kiro-write <file> <content>` | Write file | Approved |
-| `/kiro-model [auto\|opus\|sonnet\|haiku]` | Switch model | Approved |
-| `/kiro-fresh` | Start fresh conversation | Approved |
-
-## Quick Start
 
 ### Prerequisites
 
