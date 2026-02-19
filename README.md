@@ -18,7 +18,9 @@
 - 📊 **Rate Limiting** — 1 query/minute, 20 queries/hour per user
 - 🔌 **Docker Support** — Kiro CLI runs in Docker container for isolation
 - 🏗️ **Clean Architecture** — Domain, Application, Infrastructure layers
+- 🖥️ **Desktop GUI** — Optional Tauri desktop app with system tray
 - ⚙️ **Config Management** — YAML + environment variables
+- 🔌 **Plugin System** — MCP/A2A/Wasm plugin architecture (in progress)
 - 🔌 **Plugin System** — MCP/A2A/Wasm plugin architecture (in progress)
 
 ## Commands
@@ -93,7 +95,32 @@ cp .env.example .env
 ./target/release/carik-bot run
 ```
 
-### systemd Deployment
+## Cross-Platform Installation
+
+### Linux
+
+```bash
+cd installers
+chmod +x linux.sh
+sudo ./linux.sh
+```
+
+### macOS
+
+```bash
+cd installers
+chmod +x mac.sh
+./mac.sh
+```
+
+### Windows
+
+```powershell
+cd installers
+.\windows.ps1
+```
+
+### systemd Deployment (Linux)
 
 ```bash
 # Install as systemd service
@@ -108,6 +135,22 @@ systemctl status carik-bot
 # View logs
 journalctl -u carik-bot -f
 ```
+
+## Desktop GUI
+
+Optional desktop GUI with system tray:
+
+```bash
+cd gui
+npm install
+npm run tauri build
+```
+
+The GUI provides:
+- System tray icon
+- Start/Stop bot controls
+- View logs
+- Quick settings
 
 ## Configuration
 

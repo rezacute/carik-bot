@@ -605,6 +605,33 @@ fn register_approve_command(commands: &mut CommandService) {
 }
 
 /// Workspace management
+/// Get platform-specific carik-bot home directory
+fn get_carik_home() -> String {
+    if cfg!(target_os = "windows") {
+        std::env::var("APPDATA").map(|p| format!("{}\\carik-bot", p)).unwrap_or_else(|_| ".carik-bot".to_string())
+    } else if cfg!(target_os = "macos") {
+        std::env::var("HOME").map(|p| format!("{}/.carik-bot", p)).unwrap_or_else(|_| ".carik-bot".to_string())
+    } else {
+        // Linux and others
+        std::env::var("HOME").map(|p| format!("{}/.carik-bot", p)).unwrap_or_else(|_| "/home/ubuntu/.carik-bot".to_string())
+    }
+}
+
+/// Get config file path
+fn get_config_path() -> String {
+    if cfg!(target_os = "windows") {
+        std::env::var("APPDATA").map(|p| format!("{}\\carik-bot\\config.yaml", p)).unwrap_or_else(|_| "config.yaml".to_string())
+    } else if cfg!(target_os = "macos") {
+        std::env::var("HOME").map(|p| format!("{}/Library/Application Support/carik-bot/config.yaml", p)).unwrap_or_else(|_| "config.yaml".to_string())
+    } else {
+        // Linux
+        std::env::var("XDG_CONFIG_HOME").map(|p| format!("{}/carik-bot/config.yaml", p))
+            .or_else(|_| std::env::var("HOME").map(|p| format!("{}/.config/carik-bot/config.yaml", p)))
+            .unwrap_or_else(|_| "config.yaml".to_string())
+    }
+}
+
+// For backward compatibility - use environment variable or default
 const CARIK_HOME: &str = "/home/ubuntu/.carik-bot";
 
 fn register_workspace_command(commands: &mut CommandService) {
