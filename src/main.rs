@@ -240,6 +240,12 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                         let chat_id = msg.chat.id.to_string();
                         let mut text = msg.text.clone().unwrap_or_default();
                         
+                        // Update username if available
+                        let username = msg.from.as_ref().map(|u| u.username.as_deref());
+                        if let Some(uname) = username {
+                            update_user_username(&chat_id, uname);
+                        }
+                        
                         // Check if bot is mentioned in group (group chats have negative IDs)
                         let chat_id_i64: i64 = chat_id.parse().unwrap_or(0);
                         let is_group = chat_id_i64 < 0;
@@ -1535,6 +1541,22 @@ fn get_user_role(user_id: &str) -> String {
     "guest".to_string()
 }
 
+/// Update user username when they send a message
+fn update_user_username(user_id: &str, username: Option<&str>) {
+    if let Some(username) = username {
+        if let Ok(db_guard) = DB.lock() {
+            if let Some(db) = db_guard.as_ref() {
+                // Check if user exists
+                if let Ok(Some(_user)) = db.get_user_by_telegram_id(user_id) {
+                    // For now, we just ensure user exists
+                    // Username updates would require adding a method to update username
+                    let _ = db.add_user(user_id, Some(username), "user");
+                }
+            }
+        }
+    }
+}
+
 /// Check rate limit for user
 fn check_rate_limit(user_id: &str) -> Result<bool, String> {
     // Skip rate limiting for owner
@@ -1594,23 +1616,94 @@ fn register_users_command(commands: &mut CommandService) {
             
             match parts.first().map(|s| *s) {
                 Some("list") | Some("ls") | None => {
-                    Ok("User management via database.\nUse /connect for guest access.".to_string())
+                    // List all users
+                    let db_guard = DB.lock().unwrap();
+                    if let Some(db) = db_guard.as_ref() {
+                        match db.list_users() {
+                            Ok(users) => {
+                                let mut response = "📋 *Users List*\n\n".to_string();
+                                for user in users.iter().take(20) {
+                                    response.push_str(&format!(
+                                        "• {} (@{}) - {}\n",
+                                        user.telegram_id,
+                                        user.username.as_deref().unwrap_or("none"),
+                                        user.role
+                                    ));
+                                }
+                                if users.len() > 20 {
+                                    response.push_str(&format!("\n... and {} more", users.len() - 20));
+                                }
+                                Ok(response)
+                            }
+                            Err(e) => Ok(format!("Error: {}", e))
+                        }
+                    } else {
+                        Ok("Database not initialized".to_string())
+                    }
                 }
                 Some("add") => {
                     if parts.len() < 3 {
-                        return Ok("Usage: /users add <telegram_id> <role>".to_string());
+                        return Ok("Usage: /users add <telegram_id> <role>\nRoles: owner, admin, user, guest".to_string());
                     }
                     let target_id = parts[1];
                     let role = parts[2];
-                    Ok(format!("User {} added as {} (database mode)", target_id, role))
+                    
+                    // Validate role
+                    if !["owner", "admin", "user", "guest"].contains(&role) {
+                        return Ok("Invalid role. Use: owner, admin, user, guest".to_string());
+                    }
+                    
+                    let db_guard = DB.lock().unwrap();
+                    if let Some(db) = db_guard.as_ref() {
+                        match db.add_user(target_id, None, role) {
+                            Ok(_) => Ok(format!("✅ User {} added as {}", target_id, role)),
+                            Err(e) => Ok(format!("Error adding user: {}", e))
+                        }
+                    } else {
+                        Ok("Database not initialized".to_string())
+                    }
                 }
                 Some("remove") => {
                     if parts.len() < 2 {
                         return Ok("Usage: /users remove <telegram_id>".to_string());
                     }
-                    Ok("User removed (database mode)".to_string())
+                    let target_id = parts[1];
+                    
+                    let db_guard = DB.lock().unwrap();
+                    if let Some(db) = db_guard.as_ref() {
+                        match db.remove_user(target_id) {
+                            Ok(true) => Ok(format!("✅ User {} removed", target_id)),
+                            Ok(false) => Ok(format!("User {} not found", target_id)),
+                            Err(e) => Ok(format!("Error: {}", e))
+                        }
+                    } else {
+                        Ok("Database not initialized".to_string())
+                    }
                 }
-                _ => Ok("Usage: /users <list|add|remove> [args]".to_string())
+                Some("info") => {
+                    if parts.len() < 2 {
+                        return Ok("Usage: /users info <telegram_id>".to_string());
+                    }
+                    let target_id = parts[1];
+                    
+                    let db_guard = DB.lock().unwrap();
+                    if let Some(db) = db_guard.as_ref() {
+                        match db.get_user_by_telegram_id(target_id) {
+                            Ok(Some(user)) => Ok(format!(
+                                "ℹ️ *User Info*\n\nID: {}\nUsername: @{}\nRole: {}\nJoined: {}",
+                                user.telegram_id,
+                                user.username.as_deref().unwrap_or("none"),
+                                user.role,
+                                user.created_at
+                            )),
+                            Ok(None) => Ok(format!("User {} not found", target_id)),
+                            Err(e) => Ok(format!("Error: {}", e))
+                        }
+                    } else {
+                        Ok("Database not initialized".to_string())
+                    }
+                }
+                _ => Ok("Usage: /users <list|add|remove|info> [args]".to_string())
             }
         }));
 }

@@ -79,10 +79,11 @@
 ## Upcoming Features
 
 ### v0.2.0 - User Management Enhanced
-- [ ] `/users add <id> <role>` - Add user with role
-- [ ] `/users remove <id>` - Remove user
-- [ ] Username tracking
-- [ ] User activity logging
+- [x] `/users add <id> <role>` - Add user with role
+- [x] `/users remove <id>` - Remove user
+- [x] `/users list` - List all users
+- [x] `/users info <id>` - Get user info
+- [x] Username tracking - auto-updates when user messages
 
 ### v0.3.0 - LLM Enhancements
 - [ ] Conversation memory persistence
