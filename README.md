@@ -73,11 +73,39 @@ Topics: technology, business, sports, entertainment
 
 ### Kiro Commands (AI Agent in Docker)
 
+## Installation Guide
+
+### Quick Start (Linux)
+
+```bash
+# 1. Install prerequisites
+sudo apt update
+sudo apt install rustc cargo docker.io
+
+# 2. Clone the repository
+git clone https://github.com/rezacute/carik-bot.git
+cd carik-bot
+
+# 3. Configure
+cp config.yaml.example config.yaml
+# Edit config.yaml with your settings
+
+# 4. Set environment variables
+export BOT_TOKEN="your_telegram_bot_token"
+export BOT_OWNER_ID="your_telegram_user_id"
+export GROQ_API_KEY="your_groq_api_key"
+
+# 5. Run
+cargo build --release
+./target/release/carik-bot run
+```
+
 ### Prerequisites
 
-- Rust 1.70+
-- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Optional: Groq API Key (for AI features)
+- **Rust** 1.70+ - Install from https://rustup.rs/
+- **Docker** - For Kiro coding agent (optional)
+- **Telegram Bot Token** - Get from [@BotFather](https://t.me/BotFather)
+- **Groq API Key** - Get from https://console.groq.com (optional, for AI features)
 
 ### Build & Run
 
@@ -88,7 +116,7 @@ cd carik-bot
 cargo build --release
 
 # Configure
-cp .env.example .env
+cp config.yaml.example config.yaml
 # Edit .env with your BOT_TOKEN and GROQ_API_KEY
 
 # Run with Telegram

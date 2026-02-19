@@ -1,0 +1,38 @@
+bot:
+  name: carik-bot
+  prefix: '!'
+plugins:
+  directory: ./plugins
+  auto-load: false
+butler:
+  enabled: true
+  name: Carik
+  description: Your personal AI assistant
+  acknowledge_plugins: true
+  include_plugin_context: true
+security:
+  rate-limit:
+    max-requests: 20
+    window-seconds: 60
+  sandbox:
+    enabled: false
+    memory-mb: null
+  audit:
+    enabled: false
+    path: null
+adapters:
+  telegram:
+    enabled: true
+    token: 8492929647:AAEx3Tmaw5J_l_byUEKhXYrQJAZRuIPDVWc
+  console:
+    enabled: false
+whitelist:
+  enabled: true
+  users:
+  - '6504720757'
+  - '148018638'
+guests:
+  enabled: true
+  pending: []
+  approved:
+  - '148018638'
