@@ -54,6 +54,22 @@ impl Database {
             [],
         )?;
         
+        // User settings table for personalization
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS user_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                language TEXT DEFAULT 'en',
+                timezone TEXT DEFAULT 'UTC',
+                system_prompt TEXT,
+                preferences TEXT DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )",
+            [],
+        )?;
+        
         // Create indexes
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rate_limits_user ON rate_limits(user_id)",
@@ -182,4 +198,88 @@ impl Database {
         )?;
         Ok(())
     }
+    
+    // User settings
+    pub fn get_user_settings(&self, telegram_id: &str) -> SqliteResult<Option<UserSettings>> {
+        // First check if user exists
+        let user_exists = self.conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE telegram_id = ?1",
+            [telegram_id],
+            |row| row.get::<_, i32>(0)
+        ).unwrap_or(0) > 0;
+        
+        if !user_exists {
+            return Ok(None);
+        }
+        
+        let mut stmt = self.conn.prepare(
+            "SELECT us.language, us.timezone, us.system_prompt, us.preferences 
+             FROM user_settings us
+             JOIN users u ON u.id = us.user_id
+             WHERE u.telegram_id = ?1"
+        )?;
+        
+        let result = stmt.query_row([telegram_id], |row| {
+            Ok(UserSettings {
+                language: row.get(0)?,
+                timezone: row.get(1)?,
+                system_prompt: row.get(2)?,
+                preferences: row.get(3)?,
+            })
+        });
+        
+        match result {
+            Ok(settings) => Ok(Some(settings)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // User exists but no settings - return default
+                Ok(Some(UserSettings {
+                    language: "en".to_string(),
+                    timezone: "UTC".to_string(),
+                    system_prompt: None,
+                    preferences: "{}".to_string(),
+                }))
+            }
+            Err(e) => Err(e),
+        }
+    }
+    
+    pub fn set_user_settings(&self, telegram_id: &str, settings: &UserSettings) -> SqliteResult<()> {
+        // Ensure user exists - create if not
+        let user_id: i64 = match self.conn.query_row(
+            "SELECT id FROM users WHERE telegram_id = ?1",
+            [telegram_id],
+            |row| row.get(0)
+        ) {
+            Ok(id) => id,
+            Err(_) => {
+                // Create user with guest role
+                self.conn.execute(
+                    "INSERT INTO users (telegram_id, role) VALUES (?1, 'guest')",
+                    [telegram_id],
+                )?;
+                self.conn.last_insert_rowid()
+            }
+        };
+        
+        self.conn.execute(
+            "INSERT OR REPLACE INTO user_settings (user_id, language, timezone, system_prompt, preferences, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+            rusqlite::params![
+                user_id,
+                &settings.language,
+                &settings.timezone,
+                &settings.system_prompt.as_deref().unwrap_or(""),
+                &settings.preferences
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserSettings {
+    pub language: String,
+    pub timezone: String,
+    pub system_prompt: Option<String>,
+    pub preferences: String,
 }

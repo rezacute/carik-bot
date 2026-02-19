@@ -146,6 +146,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     
     // Register RSS command
     register_rss_command(&mut commands);
+    
+    // Register settings command
+    register_settings_command(&mut commands);
 
     // Select adapter
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -484,8 +487,11 @@ fn register_start_command(commands: &mut CommandService) {
     
     commands.register(Command::new("start")
         .with_description("Start conversation")
-        .with_handler(|_msg| {
-            Ok(generate_javanese_greeting("carik-bot"))
+        .with_handler(|msg| {
+            let chat_id = &msg.chat_id;
+            let settings = get_user_settings(chat_id);
+            let lang = settings.map(|s| s.language).unwrap_or_else(|| "en".to_string());
+            Ok(generate_greeting("carik-bot", &lang))
         }));
 }
 
@@ -590,7 +596,10 @@ fn register_approve_command(commands: &mut CommandService) {
             new_config.save("config.yaml").map_err(|e| 
                 crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
             
-            let greeting = generate_javanese_greeting("carik-bot");
+            // Get user's language preference
+            let settings = get_user_settings(&target_id);
+            let lang = settings.map(|s| s.language).unwrap_or_else(|| "en".to_string());
+            let greeting = generate_greeting("carik-bot", &lang);
             Ok(format!("✅ Approved! User: {}\n\n{}\n\nThey can now use /code or /kiro", target_id, greeting))
         }));
 }
@@ -884,6 +893,32 @@ async fn route_message(
     llm: &Option<GroqProvider>, 
     system_prompt: &str
 ) -> Option<String> {
+    // Get user settings
+    let user_settings = get_user_settings(chat_id);
+    
+    // Debug: log the language
+    if let Some(ref settings) = user_settings {
+        tracing::info!("User {} language: {}", chat_id, settings.language);
+    }
+    
+    // Build personalized system prompt with language instruction
+    let mut final_prompt = system_prompt.to_string();
+    
+    // Add language instruction based on user preference
+    if let Some(settings) = &user_settings {
+        let lang_instruction = match settings.language.as_str() {
+            "jv" => "\n\nIMPORTANT: Respond in Javanese language (ꦧꦱꦗꦮ).",
+            "id" => "\n\nIMPORTANT: Respond in Indonesian language.",
+            _ => "",
+        };
+        final_prompt = format!("{}{}", final_prompt, lang_instruction);
+        
+        // Add custom prompt if any
+        if let Some(custom_prompt) = &settings.system_prompt {
+            final_prompt = format!("{}\n\nPersonal instructions: {}", final_prompt, custom_prompt);
+        }
+    }
+    
     // Get or create conversation history for this chat
     let conversation = conversations.entry(chat_id.to_string()).or_insert_with(Vec::new);
     
@@ -933,7 +968,7 @@ async fn route_message(
                 );
                 
                 let messages = vec![
-                    LLMMessage::system(system_prompt),
+                    LLMMessage::system(&final_prompt),
                     LLMMessage::user(&summarize_prompt),
                 ];
                 
@@ -1023,7 +1058,7 @@ async fn route_message(
             );
             
             let messages = vec![
-                LLMMessage::system(system_prompt),
+                LLMMessage::system(&final_prompt),
                 LLMMessage::user(&summarize_prompt),
             ];
             
@@ -1069,7 +1104,7 @@ async fn route_message(
         
         // Build messages with history
         let mut messages = conversation.clone();
-        messages.push(LLMMessage::system(system_prompt));
+        messages.push(LLMMessage::system(&final_prompt));
         messages.push(LLMMessage::user(text));
         
         match llm.chat(messages.clone(), None, Some(0.7), None).await {
@@ -1572,6 +1607,20 @@ fn update_user_username(user_id: &str, username: Option<&str>) {
     }
 }
 
+/// Get user settings from database
+fn get_user_settings(user_id: &str) -> Option<database::UserSettings> {
+    if let Ok(db_guard) = DB.lock() {
+        if let Some(db) = db_guard.as_ref() {
+            tracing::debug!("Getting settings for user: {}", user_id);
+            if let Ok(settings) = db.get_user_settings(user_id) {
+                tracing::debug!("Settings found: {:?}", settings);
+                return settings;
+            }
+        }
+    }
+    None
+}
+
 /// Check rate limit for user
 fn check_rate_limit(user_id: &str) -> Result<bool, String> {
     // Skip rate limiting for owner
@@ -1759,6 +1808,132 @@ fn register_users_command(commands: &mut CommandService) {
                 _ => Ok("Usage: /users <list|add|remove|info|setrole> [args]".to_string())
             }
         }));
+}
+
+/// Register /settings command for user personalization
+fn register_settings_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("settings")
+        .with_description("Manage your personal settings")
+        .with_usage("/settings [get|set] [key] [value]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            let user_id = &msg.chat_id;
+            let args_str = args.join(" ");
+            let parts: Vec<&str> = args_str.split_whitespace().collect();
+            
+            let db_guard = DB.lock().unwrap();
+            let db = match db_guard.as_ref() {
+                Some(db) => db,
+                None => return Ok("Database not initialized".to_string())
+            };
+            
+            match parts.first().map(|s| *s) {
+                Some("get") | None => {
+                    // Show current settings
+                    match db.get_user_settings(user_id) {
+                        Ok(Some(settings)) => {
+                            Ok(format!(
+                                "⚙️ *Your Settings*\n\n\
+                                🌍 Language: {}\n\
+                                🕐 Timezone: {}\n\
+                                📝 Custom Prompt: {}\n\n\
+                                _Use /settings set <key> <value> to change_",
+                                settings.language,
+                                settings.timezone,
+                                settings.system_prompt.as_deref().unwrap_or("(none)")
+                            ))
+                        }
+                        Ok(None) => {
+                            Ok("⚙️ *Your Settings*\n\nUsing defaults:\n\
+                                🌍 Language: en\n\
+                                🕐 Timezone: UTC\n\
+                                📝 Custom Prompt: (none)\n\n\
+                                _Use /settings set <key> <value> to customize_".to_string())
+                        }
+                        Err(e) => Ok(format!("Error: {}", e))
+                    }
+                }
+                Some("set") => {
+                    if parts.len() < 3 {
+                        return Ok("Usage: /settings set <key> <value>\n\n\
+                                Keys:\n\
+                                • language - en, id, jv\n\
+                                • timezone - UTC, Asia/Jakarta, etc.\n\
+                                • prompt - custom system prompt".to_string());
+                    }
+                    
+                    let key = parts[1];
+                    let value = parts[2..].join(" ");
+                    
+                    // Get current settings
+                    let current = db.get_user_settings(user_id).ok().flatten()
+                        .unwrap_or_else(|| database::UserSettings {
+                            language: "en".to_string(),
+                            timezone: "UTC".to_string(),
+                            system_prompt: None,
+                            preferences: "{}".to_string(),
+                        });
+                    
+                    let mut settings = current;
+                    
+                    match key {
+                        "language" | "lang" => {
+                            if !["en", "id", "jv"].contains(&value.as_str()) {
+                                return Ok("Invalid language. Use: en, id, jv".to_string());
+                            }
+                            settings.language = value.to_string();
+                        }
+                        "timezone" | "tz" => {
+                            settings.timezone = value.to_string();
+                        }
+                        "prompt" | "system" => {
+                            settings.system_prompt = Some(value.to_string());
+                        }
+                        _ => return Ok("Invalid key. Use: language, timezone, prompt".to_string()),
+                    }
+                    
+                    if let Err(e) = db.set_user_settings(user_id, &settings) {
+                        return Ok(format!("Error saving: {}", e));
+                    }
+                    
+                    Ok(format!("✅ Setting saved:\n{} = {}", key, value))
+                }
+                _ => Ok("Usage: /settings <get|set> [key] [value]".to_string())
+            }
+        }));
+}
+
+fn generate_greeting(bot_username: &str, lang: &str) -> String {
+    match lang {
+        "jv" => generate_javanese_greeting(bot_username),
+        "id" => generate_indonesian_greeting(bot_username),
+        _ => generate_english_greeting(bot_username),
+    }
+}
+
+fn generate_english_greeting(_bot_username: &str) -> String {
+    "Hello! Welcome to Carik Bot 👋\n\n\
+I'm your AI assistant. How can I help you today?\n\n\
+/help - Get help\n\
+/about - About Carik\n\
+/ping - Ping\n\
+/settings - Your settings\n\
+/quote - Random quote".to_string()
+}
+
+fn generate_indonesian_greeting(_bot_username: &str) -> String {
+    "Halo! Selamat datang di Carik Bot 👋\n\n\
+Saya asisten AI Anda. Ada yang bisa saya bantu?\n\n\
+/help - Bantuan\n\
+/about - Tentang Carik\n\
+/ping - Ping\n\
+/settings - Pengaturan Anda\n\
+/quote - Kutipan acak".to_string()
 }
 
 fn generate_javanese_greeting(bot_username: &str) -> String {

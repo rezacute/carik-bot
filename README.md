@@ -36,6 +36,7 @@
 | `/users` | Manage users | Owner/Admin |
 | `/workspace` | Manage workspaces | All |
 | `/rss [source]` | Fetch RSS news | Approved |
+| `/settings` | Your personal settings | All |
 
 ### RSS News Sources
 
@@ -170,6 +171,23 @@ The owner cannot be modified by other users - it's protected.
 | `/users remove <id>` | Remove user |
 | `/users info <id>` | Get user info |
 | `/users setrole <id> <role>` | Change user role |
+
+### Personalization
+
+Each user can customize their experience:
+
+| Command | Description |
+|---------|-------------|
+| `/settings` | View your settings |
+| `/settings set language <en\|id\|jv>` | Set language (English, Indonesian, Javanese) |
+| `/settings set timezone <TZ>` | Set timezone |
+| `/settings set prompt <text>` | Custom system prompt for LLM |
+
+**Example:**
+```
+/settings set language jv
+/settings set prompt You are a helpful coding assistant
+```
 
 ### Flow
 
