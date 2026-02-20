@@ -147,6 +147,9 @@ fn run_bot(config_path: String, token_override: Option<String>) {
     // Register RSS command
     register_rss_command(&mut commands);
     
+    // Register financial command
+    register_financial_command(&mut commands);
+    
     // Register settings command
     register_settings_command(&mut commands);
 
@@ -2145,6 +2148,86 @@ fn fetch_rss_feed_blocking(url: &str) -> String {
         }
         Err(e) => format!("❌ Fetch error: {}", e)
     }
+}
+
+fn register_financial_command(commands: &mut CommandService) {
+    use crate::domain::entities::{Command, Content};
+    
+    commands.register(Command::new("finance")
+        .with_description("Get financial data: crypto, stocks, currency")
+        .with_usage("/finance [crypto|stocks|currency|summary]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            // Use blocking reqwest for financial data
+            let category = args.first().map(|s| s.to_lowercase()).unwrap_or_else(|| "summary".to_string());
+            
+            match category.as_str() {
+                "crypto" | "bitcoin" => {
+                    // Fetch crypto prices from public API
+                    let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true";
+                    let response = reqwest::blocking::get(url)
+                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+                    let json: serde_json::Value = response.json()
+                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+                    
+                    let mut msg = "₿ *Crypto Prices (USD)*\n\n".to_string();
+                    for (coin, data) in json.as_object().unwrap() {
+                        let price = data["usd"].as_f64().unwrap_or(0.0);
+                        let change = data["usd_24h_change"].as_f64().unwrap_or(0.0);
+                        let emoji = if change >= 0.0 { "📈" } else { "📉" };
+                        msg.push_str(&format!("*{}*: ${:.0} {} {:+.2}%\n", 
+                            coin.to_uppercase(), price, emoji, change));
+                    }
+                    Ok(msg)
+                }
+                "stocks" | "stock" => {
+                    Ok("📈 *Stock Markets*\n\n• US: S&P 500, NASDAQ\n• ID: Indonesia (IDX)\n• JP: Nikkei 225\n\nTry: /finance stocks us".to_string())
+                }
+                "currency" | "forex" | "usd" => {
+                    // Fetch currency from exchangerate-api (free tier)
+                    let url = "https://api.exchangerate-api.com/v4/latest/USD";
+                    let response = reqwest::blocking::get(url)
+                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+                    let json: serde_json::Value = response.json()
+                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+                    
+                    let rates = json["rates"].as_object().unwrap();
+                    let mut msg = "💱 *Exchange Rates (USD)*\n\n".to_string();
+                    
+                    let important = ["IDR", "EUR", "GBP", "JPY", "MYR", "SGD", "AUD", "CNY"];
+                    for curr in important {
+                        if let Some(rate) = rates.get(curr) {
+                            let val = rate.as_f64().unwrap_or(0.0);
+                            msg.push_str(&format!("• USD/{}: {:.2}\n", curr, val));
+                        }
+                    }
+                    Ok(msg)
+                }
+                "summary" | _ => {
+                    // Combined summary
+                    let mut summary = String::new();
+                    summary.push_str("📊 *Financial Summary*\n\n");
+                    
+                    // Quick crypto check (just return available info)
+                    summary.push_str("*Crypto:*\n");
+                    summary.push_str("• BTC, ETH, SOL prices available\n");
+                    summary.push_str("Use: /finance crypto\n\n");
+                    
+                    summary.push_str("*Currency:*\n");
+                    summary.push_str("• USD/IDR, EUR, JPY, etc.\n");
+                    summary.push_str("Use: /finance currency\n\n");
+                    
+                    summary.push_str("*Stocks:*\n");
+                    summary.push_str("• US, ID, JP markets\n");
+                    summary.push_str("Use: /finance stocks");
+                    
+                    Ok(summary)
+                }
+            }
+        }));
 }
 
 fn init_config() {

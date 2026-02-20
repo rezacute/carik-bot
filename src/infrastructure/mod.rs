@@ -14,3 +14,4 @@ pub mod adapters;
 pub mod plugins;
 pub mod llm;
 pub mod webcrawler;
+pub mod financial;
