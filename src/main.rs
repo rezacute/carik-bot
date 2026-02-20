@@ -206,10 +206,15 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
     };
     tracing::info!("Loaded persona from SOUL.md");
 
-    // Initialize LLM (Groq with Llama)
+    // Initialize LLM (Groq with selected model)
     let llm: Option<GroqProvider> = match std::env::var("GROQ_API_KEY") {
         Ok(api_key) => {
-            Some(GroqProvider::new(api_key, Some("llama-3.1-8b-instant")))
+            // Check for saved model preference
+            let model = std::fs::read_to_string("/home/ubuntu/.carik-bot/groq-model.txt")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
+            
+            Some(GroqProvider::new(api_key, Some(&model)))
         }
         Err(_) => {
             tracing::warn!("GROQ_API_KEY not set, using echo mode");
@@ -217,7 +222,10 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
         }
     };
     if llm.is_some() {
-        tracing::info!("Using Groq Llama 3.1 8B for AI responses");
+        let model = std::fs::read_to_string("/home/ubuntu/.carik-bot/groq-model.txt")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
+        tracing::info!("Using Groq {} for AI responses", model);
     }
 
     // Track first messages per chat for welcome
@@ -1392,6 +1400,42 @@ fn register_kiro_command(commands: &mut CommandService) {
                 let err = String::from_utf8_lossy(&output.stderr);
                 Ok(format!("❌ Error: {}", err))
             }
+        }));
+    
+    // Groq model - switch Groq LLM model
+    commands.register(Command::new("model")
+        .with_description("Switch Groq LLM model")
+        .with_usage("/model [llama33|llama4|kimi|qwen|gpt-oss]")
+        .with_handler(|msg| {
+            let Content::Command { name: _, args } = &msg.content else {
+                return Ok("Error: invalid command".to_string());
+            };
+            
+            match can_use_privileged(&msg.chat_id) {
+                Ok(false) => return Ok("❌ Access denied. Use /connect first.".to_string()),
+                Err(e) => return Ok(format!("Error: {}", e)),
+                _ => {}
+            }
+            
+            if args.is_empty() {
+                return Ok("Available Groq models:\n• llama33 - Llama 3.3 70B\n• llama4 - Llama 4 Scout\n• kimi - Kimi Audio\n• qwen - Qwen 2.5 72B\n• gpt-oss - GPT-4o-mini\n\nCurrent model: llama33\nUsage: /model llama33".to_string());
+            }
+
+            let model = args[0].to_lowercase();
+            // Map to actual Groq model names
+            let model_name = match model.as_str() {
+                "llama33" => "llama-3.3-70b-versatile",
+                "llama4" => "llama-4-scout-17b-16e",
+                "kimi" => "kimi-audio-1.5-preview",
+                "qwen" => "qwen-2.5-72b-instruct",
+                "gpt-oss" => "gpt-4o-mini",
+                _ => return Ok("Unknown model. Use: llama33, llama4, kimi, qwen, gpt-oss".to_string()),
+            };
+            
+            // Save model preference to file
+            let _ = std::fs::write("/home/ubuntu/.carik-bot/groq-model.txt", model_name);
+
+            Ok(format!("✅ Groq model set to: {}\n\nNote: Restart bot for changes to take effect.", args[0]))
         }));
     
     // kiro model - switch Kiro model
