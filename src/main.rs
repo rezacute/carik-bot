@@ -510,7 +510,7 @@ fn register_connect_command(commands: &mut CommandService) {
         .with_description("Request one-time access (guests)")
         .with_usage("/connect")
         .with_handler(|msg| {
-            let Content::Command { name, args: _ } = &msg.content else {
+            let Content::Command { name: _, args: _ } = &msg.content else {
                 return Ok("Error: invalid command".to_string());
             };
             

@@ -13,3 +13,4 @@ pub mod storage;
 pub mod adapters;
 pub mod plugins;
 pub mod llm;
+pub mod webcrawler;
