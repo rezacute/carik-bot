@@ -2166,21 +2166,72 @@ fn register_financial_command(commands: &mut CommandService) {
             
             match category.as_str() {
                 "crypto" | "bitcoin" => {
-                    // Fetch crypto prices from public API
-                    let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true";
-                    let response = reqwest::blocking::get(url)
-                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
-                    let json: serde_json::Value = response.json()
-                        .map_err(|e| crate::application::errors::CommandError::ExecutionFailed(e.to_string()))?;
+                    // Use cached response if available (cache for 60 seconds)
+                    let cache_path = "/home/ubuntu/.carik-bot/crypto-cache.json";
+                    let use_cache = std::path::Path::new(cache_path).exists();
+                    
+                    let mut crypto_data: Option<serde_json::Value> = None;
+                    
+                    if use_cache {
+                        if let Ok(content) = std::fs::read_to_string(cache_path) {
+                            if let Ok(metadata) = std::fs::metadata(cache_path) {
+                                if let Ok(modified) = metadata.modified() {
+                                    let age = std::time::SystemTime::now().duration_since(modified);
+                                    if age.is_ok() && age.unwrap().as_secs() < 60 {
+                                        // Cache is fresh (< 60s)
+                                        crypto_data = serde_json::from_str(&content).ok();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Fetch if no cache or cache expired
+                    if crypto_data.is_none() {
+                        let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true";
+                        let client = reqwest::blocking::Client::builder()
+                            .user_agent("CarikBot/1.0")
+                            .build()
+                            .ok();
+                        if let Some(client) = client {
+                            if let Ok(response) = client.get(url).send() {
+                                if let Ok(json) = response.json::<serde_json::Value>() {
+                                    // Cache the response
+                                    let _ = std::fs::write(cache_path, json.to_string());
+                                    crypto_data = Some(json);
+                                }
+                            }
+                        }
+                    }
                     
                     let mut msg = "₿ *Crypto Prices (USD)*\n\n".to_string();
-                    for (coin, data) in json.as_object().unwrap() {
-                        let price = data["usd"].as_f64().unwrap_or(0.0);
-                        let change = data["usd_24h_change"].as_f64().unwrap_or(0.0);
-                        let emoji = if change >= 0.0 { "📈" } else { "📉" };
-                        msg.push_str(&format!("*{}*: ${:.0} {} {:+.2}%\n", 
-                            coin.to_uppercase(), price, emoji, change));
+                    
+                    if let Some(json) = crypto_data {
+                        // Parse BTC
+                        if let Some(btc) = json.get("bitcoin") {
+                            let price = btc["usd"].as_f64().unwrap_or(0.0);
+                            let change = btc["usd_24h_change"].as_f64().unwrap_or(0.0);
+                            let emoji = if change >= 0.0 { "📈" } else { "📉" };
+                            msg.push_str(&format!("• BTC: ${:.0} {} {:+.2}%\n", price, emoji, change));
+                        }
+                        // Parse ETH
+                        if let Some(eth) = json.get("ethereum") {
+                            let price = eth["usd"].as_f64().unwrap_or(0.0);
+                            let change = eth["usd_24h_change"].as_f64().unwrap_or(0.0);
+                            let emoji = if change >= 0.0 { "📈" } else { "📉" };
+                            msg.push_str(&format!("• ETH: ${:.0} {} {:+.2}%\n", price, emoji, change));
+                        }
+                        // Parse SOL
+                        if let Some(sol) = json.get("solana") {
+                            let price = sol["usd"].as_f64().unwrap_or(0.0);
+                            let change = sol["usd_24h_change"].as_f64().unwrap_or(0.0);
+                            let emoji = if change >= 0.0 { "📈" } else { "📉" };
+                            msg.push_str(&format!("• SOL: ${:.0} {} {:+.2}%\n", price, emoji, change));
+                        }
+                    } else {
+                        msg = "❌ Crypto API unavailable. Try again later.".to_string();
                     }
+                    
                     Ok(msg)
                 }
                 "stocks" | "stock" => {
