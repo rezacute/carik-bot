@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber;
 use std::fs;
 use std::sync::Mutex;
+use std::time::Duration;
 use once_cell::sync::Lazy;
 
 mod domain;
@@ -322,7 +323,7 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                         }
                                     };
                                     
-                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
+                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, response.chars().take(100).collect::<String>());
                                     if let Err(e) = bot.send_message(&chat_id, &response).await {
                                         tracing::error!("Failed to send message: {}", e);
                                     }
@@ -338,7 +339,7 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                         Err(e) => format!("Error: {}", e),
                                     };
                                     
-                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, &response[..response.len().min(100)]);
+                                    tracing::info!("Sending response to chat_id {}: {}", chat_id, response.chars().take(100).collect::<String>());
                                     if let Err(e) = bot.send_message(&chat_id, &response).await {
                                         tracing::error!("Failed to send message: {}", e);
                                     }
@@ -347,8 +348,9 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                 // Auto-route: detect intent and route to appropriate handler
                                 match route_message(&text, &chat_id, &mut conversations, &llm, &system_prompt).await {
                                     Some(resp) => {
-                                        // Send response
-                                        tracing::info!("Sending response to chat_id {}: {}", chat_id, &resp[..resp.len().min(100)]);
+                                        // Send response - use char indexing for Unicode
+                                        let preview = resp.chars().take(100).collect::<String>();
+                                        tracing::info!("Sending response to chat_id {}: {}", chat_id, preview);
                                         if let Err(e) = bot.send_message(&chat_id, &resp).await {
                                             tracing::error!("Failed to send message: {}", e);
                                         }
@@ -783,6 +785,20 @@ fn is_coding_intent(text: &str) -> bool {
     coding_keywords.iter().any(|kw| lower.contains(kw))
 }
 
+/// Detect if user message is asking for financial data
+fn is_financial_intent(text: &str) -> bool {
+    let financial_keywords = [
+        "crypto", "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+        "stock", "stocks", "s&p", "nasdaq", "dow", "jones", "index",
+        "forex", "currency", "exchange", "usd", "eur", "idr", "jpy",
+        "price", "market", "trading", "trading",
+        "crypto price", "stock price", "bitcoin price",
+    ];
+    
+    let lower = text.to_lowercase();
+    financial_keywords.iter().any(|kw| lower.contains(kw))
+}
+
 /// Detect if user message is asking for news/RSS
 fn is_rss_intent(text: &str) -> bool {
     let rss_keywords = [
@@ -857,7 +873,7 @@ fn detect_news_topic(text: &str) -> Option<(String, String)> {
         (vec!["india", "indian"], "India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
         (vec!["indonesia", "indonesian"], "Indonesia", "https://en.antaranews.com/rss/news.xml"),
         (vec!["italy", "italian"], "Italy", "https://www.agi.it/rss"),
-        (vec!["japan", "japanese"], "Japan", "https://www.japantimes.co.jp/feed"),
+        (vec!["japan", "japanese"], "Japan", "https://www3.nhk.or.jp/rss/news/cat0.xml"),
         (vec!["mexico", "mexican"], "Mexico", "https://www.eluniversal.com.mx/rss.xml"),
         (vec!["russia", "russian"], "Russia", "https://www.rt.com/rss/news/"),
         (vec!["saudi", "saudi arabia"], "Saudi Arabia", "https://www.arabnews.com/rss.xml"),
@@ -1120,6 +1136,54 @@ async fn route_message(
         conversation.push(LLMMessage::user(text.to_string()));
         conversation.push(LLMMessage::assistant(response.clone()));
         return Some(response);
+    }
+    
+    // Check for financial intent - fetch and summarize with LLM
+    if is_financial_intent(text) {
+        tracing::info!("Detected financial intent, fetching data");
+        
+        // Determine what data to fetch
+        let lower = text.to_lowercase();
+        let data_type = if lower.contains("crypto") || lower.contains("bitcoin") || lower.contains("btc") {
+            "crypto"
+        } else if lower.contains("stock") || lower.contains("s&p") || lower.contains("nasdaq") {
+            "stocks"
+        } else if lower.contains("currency") || lower.contains("forex") || lower.contains("exchange") || lower.contains("usd") || lower.contains("idr") {
+            "currency"
+        } else {
+            "all"
+        };
+        
+        // Fetch financial data
+        let financial_data = fetch_financial_data(data_type);
+        
+        // Use LLM to summarize
+        if let Some(ref llm) = llm {
+            let summarize_prompt = format!(
+                "You're a financial analyst. Provide a brief, friendly summary (2-3 sentences) of these market data, then list the key numbers. Keep it conversational and easy to understand.\n\n{}",
+                financial_data
+            );
+            
+            let messages = vec![
+                LLMMessage::system(&final_prompt),
+                LLMMessage::user(&summarize_prompt),
+            ];
+            
+            match llm.chat(messages, None, Some(0.7), None).await {
+                Ok(response) => {
+                    conversation.push(LLMMessage::user(text.to_string()));
+                    conversation.push(LLMMessage::assistant(response.content.clone()));
+                    return Some(response.content);
+                }
+                Err(e) => {
+                    // Fallback to raw data on error
+                    return Some(financial_data);
+                }
+            }
+        }
+        
+        // No LLM - return raw data
+        return Some(financial_data);
     }
     
     // Check for coding intent
@@ -1398,7 +1462,7 @@ fn register_kiro_command(commands: &mut CommandService) {
             
             if output.status.success() {
                 let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-                Ok(format!("🔄 Fresh conversation started!\n\n{}", &stdout[..stdout.len().min(500)]))
+                Ok(format!("🔄 Fresh conversation started!\n\n{}", stdout.chars().take(500).collect::<String>()))
             } else {
                 let err = String::from_utf8_lossy(&output.stderr);
                 Ok(format!("❌ Error: {}", err))
@@ -1530,7 +1594,7 @@ fn kiro_start(prompt: &str) -> Result<String, String> {
                 Ok(_) => tracing::info!("Output saved to file"),
                 Err(e) => tracing::error!("Failed to save output: {}", e),
             }
-            return Ok(format!("📤 Kiro response:\n{}\n\nUse /kiro-log for full output.", &cleaned[..cleaned.len().min(500)]));
+            return Ok(format!("📤 Kiro response:\n{}\n\nUse /kiro-log for full output.", cleaned.chars().take(500).collect::<String>()));
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
             tracing::error!("Kiro error: {}", err);
@@ -1567,7 +1631,7 @@ fn kiro_log() -> Result<String, String> {
     let output_file = "/home/ubuntu/.carik-bot/kiro-last-output.txt";
     if let Ok(content) = std::fs::read_to_string(output_file) {
         if !content.is_empty() {
-            return Ok(format!("📋 Last Kiro output:\n```\n{}```", &content[..content.len().min(3000)]));
+            return Ok(format!("📋 Last Kiro output:\n```\n{}```", content.chars().take(3000).collect::<String>()));
         }
     }
     
@@ -1583,7 +1647,7 @@ fn kiro_log() -> Result<String, String> {
         if logs.is_empty() {
             return Ok("No output yet. Use /kiro <prompt> to start.".to_string());
         }
-        Ok(format!("📋 Kiro logs:\n```\n{}```", &logs[..logs.len().min(2000)]))
+        Ok(format!("📋 Kiro logs:\n```\n{}```", logs.chars().take(2000).collect::<String>()))
     } else {
         Ok("No active Kiro session. Use /kiro <prompt> to start.".to_string())
     }
@@ -2061,6 +2125,105 @@ async fn run_console_bot<B: Bot>(bot: B, mut commands: CommandService) {
     }
 }
 
+/// Fetch financial data for LLM summarization
+fn fetch_financial_data(data_type: &str) -> String {
+    let mut result = String::new();
+    
+    // Crypto data
+    if data_type == "crypto" || data_type == "all" {
+        result.push_str("*Crypto Prices (USD):*\n");
+        let cache_path = "/home/ubuntu/.carik-bot/crypto-cache.json";
+        
+        if let Ok(content) = std::fs::read_to_string(cache_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(btc) = json.get("bitcoin") {
+                    let price = btc["usd"].as_f64().unwrap_or(0.0);
+                    let change = btc["usd_24h_change"].as_f64().unwrap_or(0.0);
+                    result.push_str(&format!("• BTC: ${:.0} ({:+.2}% 24h)\n", price, change));
+                }
+                if let Some(eth) = json.get("ethereum") {
+                    let price = eth["usd"].as_f64().unwrap_or(0.0);
+                    let change = eth["usd_24h_change"].as_f64().unwrap_or(0.0);
+                    result.push_str(&format!("• ETH: ${:.0} ({:+.2}% 24h)\n", price, change));
+                }
+                if let Some(sol) = json.get("solana") {
+                    let price = sol["usd"].as_f64().unwrap_or(0.0);
+                    let change = sol["usd_24h_change"].as_f64().unwrap_or(0.0);
+                    result.push_str(&format!("• SOL: ${:.0} ({:+.2}% 24h)\n", price, change));
+                }
+            }
+        } else {
+            result.push_str("• (Crypto data unavailable)\n");
+        }
+        result.push_str("\n");
+    }
+    
+    // Currency data
+    if data_type == "currency" || data_type == "all" {
+        result.push_str("*Exchange Rates (USD):*\n");
+        let url = "https://api.exchangerate-api.com/v4/latest/USD";
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("CarikBot/1.0")
+            .timeout(std::time::Duration::from_secs(5))
+            .build();
+        
+        if let Ok(client) = client {
+            if let Ok(response) = client.get(url).send() {
+                if let Ok(json) = response.json::<serde_json::Value>() {
+                    if let Some(rates) = json.get("rates").and_then(|r| r.as_object()) {
+                        let important = [("IDR", "IDR"), ("EUR", "EUR"), ("GBP", "GBP"), ("JPY", "JPY")];
+                        for (code, name) in important {
+                            if let Some(rate) = rates.get(code) {
+                                if let Some(val) = rate.as_f64() {
+                                    result.push_str(&format!("• USD/{}: {:.2}\n", name, val));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result.push_str("\n");
+    }
+    
+    // Stock data
+    if data_type == "stocks" || data_type == "all" {
+        result.push_str("*US Stock Indices:*\n");
+        let symbols = vec![("^GSPC", "S&P 500"), ("^DJI", "Dow Jones"), ("^IXIC", "NASDAQ")];
+        
+        for (symbol, name) in symbols {
+            let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{}", symbol);
+            let client = reqwest::blocking::Client::builder()
+                .user_agent("CarikBot/1.0")
+                .timeout(std::time::Duration::from_secs(5))
+                .build();
+            
+            if let Ok(client) = client {
+                if let Ok(response) = client.get(&url).send() {
+                    if let Ok(json) = response.json::<serde_json::Value>() {
+                        if let Some(price) = json
+                            .get("chart")
+                            .and_then(|c| c.get("result"))
+                            .and_then(|r| r.get(0))
+                            .and_then(|d| d.get("meta"))
+                            .and_then(|m| m.get("regularMarketPrice"))
+                            .and_then(|p| p.as_f64())
+                        {
+                            result.push_str(&format!("• {}: {:.2}\n", name, price));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if result.is_empty() {
+        result = "Unable to fetch financial data. Please try again.".to_string();
+    }
+    
+    result
+}
+
 fn register_rss_command(commands: &mut CommandService) {
     use crate::domain::entities::{Command, Content};
     
@@ -2235,7 +2398,53 @@ fn register_financial_command(commands: &mut CommandService) {
                     Ok(msg)
                 }
                 "stocks" | "stock" => {
-                    Ok("📈 *Stock Markets*\n\n• US: S&P 500, NASDAQ\n• ID: Indonesia (IDX)\n• JP: Nikkei 225\n\nTry: /finance stocks us".to_string())
+                    // Fetch stock data from Yahoo Finance
+                    let symbols = match category.as_str() {
+                        "stocks" | "stock" => {
+                            // Default: major US indices
+                            vec![
+                                ("^GSPC", "S&P 500"),
+                                ("^DJI", "Dow Jones"),
+                                ("^IXIC", "NASDAQ"),
+                            ]
+                        }
+                        _ => vec![]
+                    };
+                    
+                    let mut msg = "📈 *US Stock Indices*\n\n".to_string();
+                    
+                    for (symbol, name) in symbols {
+                        let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{}", symbol);
+                        let client = reqwest::blocking::Client::builder()
+                            .user_agent("CarikBot/1.0")
+                            .timeout(Duration::from_secs(10))
+                            .build();
+                        
+                        if let Ok(client) = client {
+                            if let Ok(response) = client.get(&url).send() {
+                                if let Ok(json) = response.json::<serde_json::Value>() {
+                                    if let Some(result) = json.get("chart") {
+                                        if let Some(results) = result.get("result") {
+                                            if let Some(data) = results.get(0) {
+                                                if let Some(meta) = data.get("meta") {
+                                                    let price = meta["regularMarketPrice"].as_f64().unwrap_or(0.0);
+                                                    if price > 0.0 {
+                                                        msg.push_str(&format!("• {}: {:.2}\n", name, price));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if msg == "📈 *US Stock Indices*\n\n" {
+                        msg = "📈 *Stock Markets*\n\n• US: S&P 500, Dow Jones, NASDAQ\n• ID: Indonesia (IDX)\n• JP: Nikkei 225\n\nAPI temporarily unavailable.".to_string();
+                    }
+                    
+                    Ok(msg)
                 }
                 "currency" | "forex" | "usd" => {
                     // Fetch currency from exchangerate-api (free tier)
