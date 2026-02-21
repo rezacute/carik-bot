@@ -255,6 +255,10 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                         let chat_id = msg.chat.id.to_string();
                         let mut text = msg.text.clone().unwrap_or_default();
                         
+                        // Check for reply to another message
+                        let reply_text = msg.reply_to_message.as_ref()
+                            .and_then(|r| r.text.clone());
+                        
                         // Update username if available
                         let username = msg.from.as_ref().map(|u| u.username.as_deref());
                         if let Some(uname) = username {
@@ -346,7 +350,7 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                                 }
                             } else {
                                 // Auto-route: detect intent and route to appropriate handler
-                                match route_message(&text, &chat_id, &mut conversations, &llm, &system_prompt).await {
+                                match route_message(&text, &chat_id, &mut conversations, &llm, &system_prompt, reply_text.as_deref()).await {
                                     Some(resp) => {
                                         // Send response - use char indexing for Unicode
                                         let preview = resp.chars().take(100).collect::<String>();
@@ -505,6 +509,16 @@ fn register_start_command(commands: &mut CommandService) {
             let settings = get_user_settings(chat_id);
             let lang = settings.map(|s| s.language).unwrap_or_else(|| "en".to_string());
             Ok(generate_greeting("carik-bot", &lang))
+        }));
+    
+    // About command - show bot capabilities
+    commands.register(Command::new("about")
+        .with_description("About Carik Bot - capabilities")
+        .with_handler(|msg| {
+            let chat_id = &msg.chat_id;
+            let settings = get_user_settings(chat_id);
+            let lang = settings.map(|s| s.language).unwrap_or_else(|| "en".to_string());
+            Ok(generate_about(lang))
         }));
 }
 
@@ -810,6 +824,65 @@ fn is_rss_intent(text: &str) -> bool {
     rss_keywords.iter().any(|kw| lower.contains(kw))
 }
 
+/// Detect if user is asking about bot capabilities/skills
+fn is_capabilities_intent(text: &str) -> bool {
+    let capability_keywords = [
+        "what can you do", "what can i do", "what are your skills",
+        "what can bot do", "your capabilities", "your features",
+        "apa yang kamu bisa", "bisa apa saja", "fitur apa saja",
+        "apa kemampuanmu", "skillmu apa", "bisa ngapain",
+        "apa gunanya", "kepake apa", "funktion",
+        "help me", "help me with", "tolong",
+    ];
+    
+    let lower = text.to_lowercase();
+    capability_keywords.iter().any(|kw| lower.contains(kw))
+}
+
+/// Detect if user is asking to translate something
+fn is_translate_intent(text: &str) -> bool {
+    let translate_keywords = [
+        "translate", "terjemahkan", "artinya", "meaning",
+        " apa arti", "artinya apa", "m translate",
+        "terjemahkan ini", " terjemahkan", "penterjemah",
+        " terjemah", " translation", " penterjemahan",
+    ];
+    
+    let lower = text.to_lowercase();
+    translate_keywords.iter().any(|kw| lower.contains(kw))
+}
+
+/// Extract target language from translate request
+fn detect_target_language(text: &str) -> String {
+    let lower = text.to_lowercase();
+    
+    // Check for language indicators
+    if lower.contains("to english") || lower.contains("to inggris") || lower.contains("in english") {
+        return "English".to_string();
+    }
+    if lower.contains("to indonesian") || lower.contains("to bahasa") || lower.contains("ke indonesia") || lower.contains("dalam bahasa indonesia") {
+        return "Indonesian".to_string();
+    }
+    if lower.contains("to javanese") || lower.contains("to jawa") || lower.contains("ke jawa") || lower.contains("dalam bahasa jawa") {
+        return "Javanese".to_string();
+    }
+    if lower.contains("to spanish") || lower.contains("ke spanyol") {
+        return "Spanish".to_string();
+    }
+    if lower.contains("to chinese") || lower.contains("to cina") || lower.contains("ke cina") {
+        return "Chinese".to_string();
+    }
+    if lower.contains("to japanese") || lower.contains("to jepang") || lower.contains("ke jepang") {
+        return "Japanese".to_string();
+    }
+    if lower.contains("to korean") || lower.contains("to korea") || lower.contains("ke korea") {
+        return "Korean".to_string();
+    }
+    
+    // Default to English
+    "English".to_string()
+}
+
 /// Detect if user message is asking for a skill/tool
 fn detect_skill(text: &str) -> Option<String> {
     let skill_keywords = [
@@ -945,7 +1018,8 @@ async fn route_message(
     chat_id: &str, 
     conversations: &mut std::collections::HashMap<String, Vec<LLMMessage>>, 
     llm: &Option<GroqProvider>, 
-    system_prompt: &str
+    system_prompt: &str,
+    reply_text: Option<&str>
 ) -> Option<String> {
     // Get user settings
     let user_settings = get_user_settings(chat_id);
@@ -1045,6 +1119,84 @@ async fn route_message(
             conversation.push(LLMMessage::assistant(response.clone()));
             return Some(response);
         }
+    }
+    
+    // Check for capabilities/about intent
+    if is_capabilities_intent(text) {
+        tracing::info!("Detected capabilities intent");
+        let settings = get_user_settings(chat_id);
+        let lang = settings.map(|s| s.language).unwrap_or_else(|| "en".to_string());
+        return Some(generate_about(lang));
+    }
+    
+    // Check for translate intent
+    if is_translate_intent(text) || reply_text.is_some() {
+        tracing::info!("Detected translate intent");
+        
+        // Detect target language
+        let target_lang = detect_target_language(text);
+        
+        // Get text to translate: prefer reply, otherwise extract from message
+        let text_to_translate = if let Some(reply) = reply_text {
+            if reply.trim().is_empty() {
+                text.replace("translate", "")
+                    .replace("terjemahkan", "")
+                    .replace("artinya", "")
+                    .trim()
+                    .to_string()
+            } else {
+                reply.to_string()
+            }
+        } else {
+            // Extract text to translate (remove translate keywords)
+            text.replace("translate", "")
+                .replace("terjemahkan", "")
+                .replace("artinya", "")
+                .replace("meaning", "")
+                .replace("to english", "")
+                .replace("to indonesian", "")
+                .replace("to javanese", "")
+                .replace("to bahasa", "")
+                .replace("to jawa", "")
+                .replace("in English", "")
+                .replace("in Indonesian", "")
+                .replace("ke indonesia", "")
+                .replace("ke jawa", "")
+                .replace("dalam bahasa indonesia", "")
+                .replace("dalam bahasa jawa", "")
+                .trim()
+                .to_string()
+        };
+        
+        if text_to_translate.is_empty() {
+            return Some("❌ Please provide text to translate or reply to a message with translate command.".to_string());
+        }
+        
+        let translate_prompt = format!(
+            "Translate the following text to {}.\n\nText: \"{}\"\n\nTranslation:",
+            target_lang, text_to_translate
+        );
+        
+        // Use LLM to translate
+        if let Some(ref llm) = llm {
+            let messages = vec![
+                LLMMessage::system("You are a professional translator. Provide accurate translations."),
+                LLMMessage::user(&translate_prompt),
+            ];
+            
+            match llm.chat(messages, None, Some(0.3), None).await {
+                Ok(response) => {
+                    conversation.push(LLMMessage::user(text.to_string()));
+                    conversation.push(LLMMessage::assistant(response.content.clone()));
+                    return Some(response.content);
+                }
+                Err(e) => {
+                    return Some(format!("❌ Translation error: {}", e));
+                }
+            }
+        }
+        
+        return Some("❌ LLM not available for translation.".to_string());
     }
     
     // Check for RSS/news intent - fetch and summarize
@@ -2051,6 +2203,116 @@ fn generate_greeting(bot_username: &str, lang: &str) -> String {
         "jv" => generate_javanese_greeting(bot_username),
         "id" => generate_indonesian_greeting(bot_username),
         _ => generate_english_greeting(bot_username),
+    }
+}
+
+fn generate_about(lang: String) -> String {
+    match lang.as_str() {
+        "id" => {
+            "🤖 *Tentang Carik Bot*\n\n\
+Carik adalah asisten AI yang bisa membantu Anda dengan:\n\n\
+*🧠 Percakapan & AI*\n\
+• Obrolan alami dengan AI (Groq/Llama)\n\
+• Ingat konteks percakapan\n\
+• Bahasa: English, Indonesia, Jawa\n\n\
+*🌐 Translate / Terjemahan*\n\
+• Reply ke pesan + \"translate to [bahasa]\"\n\
+• \"terjemahkan ini ke jawa\"\n\
+• \"apa artinya hello\"\n\
+• Supports: English, Indonesian, Javanese, Spanish, Chinese, Japanese, Korean\n\n\
+*💻 Coding*\n\
+• /code <prompt> - Coding agent\n\
+• /kiro <prompt> - Coding agent (Docker)\n\
+• /kiro-status, /kiro-log, /kiro-kill\n\n\
+*📰 Berita & News*\n\
+• /rss [sumber] - Berita dari RSS\n\
+• \"berita tentang [negara]\" - Berita otomatis\n\
+• Sumber: Yahoo, Google, BBC, TechCrunch, dll\n\n\
+*💰 Keuangan*\n\
+• /finance - Ringkasan keuangan\n\
+• /finance crypto - Harga crypto (BTC, ETH, SOL)\n\
+• /finance currency - Kurs mata uang\n\
+• /finance stocks - Indeks saham\n\
+• \"harga bitcoin\" - Tanya natural\n\n\
+*⚙️ Lainnya*\n\
+• /workspace - Kelola workspace\n\
+• /settings - Pengaturan bahasa & preferensi\n\
+• /users - Kelola pengguna (owner/admin)\n\
+• /clear - Hapus riwayat obrolan\n\n\
+*🎯 Tips*\n\
+Tanya saja dalam bahasa natural! Contoh:\n\
+\"bagaimana harga bitcoin hari ini?\"\n\
+\"berita terbaru dari Jepang\"\n\
+\"tulis kode python untuk hello world\"".to_string()
+        }
+        "jv" => {
+            "🤖 *Tentang Carik Bot*\n\n\
+Carik iku AI assistant sing bisa mbantu pandjenengan:\n\n\
+*🧠 Percakapan & AI*\n\
+• Obrolan alami karo AI (Groq/Llama)\n\
+• Eling konteks obrolan\n\
+• Basa: English, Indonesia, Jawa\n\n\
+*🌐 Translate / Terjemahan*\n\
+• Reply + \"translate to [basa]\"\n\
+• \"terjemake iki ke jawa\"\n\
+• \"apa arti hello\"\n\
+• Supports: English, Indonesian, Javanese, Spanish, Chinese, Japanese, Korean\n\n\
+*💻 Coding*\n\
+• /code <prompt> - Coding agent\n\
+• /kiro <prompt> - Coding agent (Docker)\n\
+• /kiro-status, /kiro-log, /kiro-kill\n\n\
+*📰 Berita & News*\n\
+• /rss [sumber] - Berita saka RSS\n\
+• \"berita [negara]\" - Berita otomatis\n\
+• Sumber: Yahoo, Google, BBC, TechCrunch\n\n\
+*💰 Keuangan*\n\
+• /finance - Ringkasan keuangan\n\
+• /finance crypto - Harga crypto\n\
+• /finance currency - Kurs mata uang\n\
+• /finance stocks - Indeks saham\n\n\
+*⚙️ Liyane*\n\
+• /workspace - Ngatur workspace\n\
+• /settings - Pengaturan basa\n\
+• /users - Ngatur pengguna\n\
+• /clear - Resikaken obrolan".to_string()
+        }
+        _ => {
+            "🤖 *About Carik Bot*\n\n\
+Carik is an AI assistant that can help you with:\n\n\
+*🧠 Chat & AI*\n\
+• Natural conversation with AI (Groq/Llama)\n\
+• Remembers conversation context\n\
+• Languages: English, Indonesian, Javanese\n\n\
+*🌐 Translate*\n\
+• Reply to message + \"translate to [language]\"\n\
+• \"translate this to Javanese\"\n\
+• \"terjemahkan ke indonesia\"\n\
+• Supports: English, Indonesian, Javanese, Spanish, Chinese, Japanese, Korean\n\n\
+*💻 Coding*\n\
+• /code <prompt> - Coding agent\n\
+• /kiro <prompt> - Coding agent (Docker)\n\
+• /kiro-status, /kiro-log, /kiro-kill\n\n\
+*📰 News & RSS*\n\
+• /rss [source] - News from RSS feeds\n\
+• \"news about [country]\" - Auto-fetch news\n\
+• Sources: Yahoo, Google, BBC, TechCrunch, etc.\n\n\
+*💰 Finance*\n\
+• /finance - Financial summary\n\
+• /finance crypto - Crypto prices (BTC, ETH, SOL)\n\
+• /finance currency - Exchange rates\n\
+• /finance stocks - Stock indices\n\
+• \"how's bitcoin?\" - Natural language!\n\n\
+*⚙️ Other*\n\
+• /workspace - Manage workspaces\n\
+• /settings - Language & preferences\n\
+• /users - User management (owner/admin)\n\
+• /clear - Clear conversation history\n\n\
+*🎯 Tips*\n\
+Just ask naturally! Examples:\n\
+\"how's bitcoin doing?\"\n\
+\"latest news from Japan\"\n\
+\"write a python hello world\"".to_string()
+        }
     }
 }
 

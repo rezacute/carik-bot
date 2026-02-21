@@ -40,6 +40,15 @@
 | `/rss [source]` | Fetch RSS news | Approved |
 | `/settings` | Your personal settings | All |
 
+### Translate
+
+The bot can translate messages using AI:
+
+- **Reply to a message** + type "translate to [language]"
+- Example: Reply to any message with "translate to javanese"
+- Supported languages: English, Indonesian, Javanese, Spanish, Chinese, Japanese, Korean
+- Also works: "terjemahkan ke indonesia", "apa artinya hello"
+
 ### RSS News Sources
 
 **Just say "news about [country]" and the bot will fetch and summarize!**
