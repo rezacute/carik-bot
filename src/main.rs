@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber;
+use std::collections::HashMap;
 use std::fs;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -18,9 +19,16 @@ use infrastructure::llm::{LLM, GroqProvider, LLMMessage};
 use application::services::CommandService;
 use domain::traits::Bot;
 use plugins::{PluginManager, trait_def::ExtendedPluginConfig};
+use infrastructure::miniapp::{MiniAppManager, AppState};
 
 // Global database instance
 static DB: Lazy<Mutex<Option<database::Database>>> = Lazy::new(|| Mutex::new(None));
+
+// Global mini-app manager
+static MINI_APPS: Lazy<MiniAppManager> = Lazy::new(|| MiniAppManager::new());
+
+// User mini-app states
+static APP_STATES: Lazy<Mutex<HashMap<String, AppState>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Parser)]
 #[command(name = "carik-bot")]
@@ -295,6 +303,27 @@ async fn run_telegram_bot(bot: &mut TelegramAdapter, commands: &mut CommandServi
                             
                             // Process command or message
                             if text.starts_with(&commands.prefix()) || text.starts_with('/') {
+                                // Extract the first word (the command) for exact matching
+                                // Remove leading / if present
+                                let cmd_text = text.trim_start_matches('/').trim_start_matches(&commands.prefix());
+                                let command = cmd_text.split_whitespace().next().unwrap_or("").to_lowercase();
+                                
+                                // Match exactly against known mini-app commands
+                                match command.as_str() {
+                                    "scramble" | "hint" | "guess" | "quit" => {
+                                        let mut app_states = APP_STATES.lock().unwrap();
+                                        let user_state = app_states.entry(chat_id.clone()).or_insert_with(AppState::default);
+                                        
+                                        if let Some(response) = MINI_APPS.handle(&text, &chat_id, user_state) {
+                                            if let Err(e) = bot.send_message(&chat_id, &response).await {
+                                                tracing::error!("Failed to send message: {}", e);
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                
                                 // Check for /code command (coding agent)
                                 let trimmed = text.trim_start_matches(&commands.prefix()).trim_start_matches('/');
                                 if trimmed.starts_with("code") {
@@ -1021,6 +1050,16 @@ async fn route_message(
     system_prompt: &str,
     reply_text: Option<&str>
 ) -> Option<String> {
+    // Check for mini-app commands first (games, etc.)
+    {
+        let mut app_states = APP_STATES.lock().unwrap();
+        let user_state = app_states.entry(chat_id.to_string()).or_insert_with(AppState::default);
+        
+        if let Some(response) = MINI_APPS.handle(text, chat_id, user_state) {
+            return Some(response);
+        }
+    }
+    
     // Get user settings
     let user_settings = get_user_settings(chat_id);
     
@@ -2234,6 +2273,11 @@ Carik adalah asisten AI yang bisa membantu Anda dengan:\n\n\
 • /finance currency - Kurs mata uang\n\
 • /finance stocks - Indeks saham\n\
 • \"harga bitcoin\" - Tanya natural\n\n\
+*🎮 Mini-Games*\n\
+• /scramble - Mulai permainan scrambel kata\n\
+• /hint - Dapatkan petunjuk (maks 2)\n\
+• /guess [kata] - Tebak jawaban\n\
+• /quit - Keluar permainan\n\n\
 *⚙️ Lainnya*\n\
 • /workspace - Kelola workspace\n\
 • /settings - Pengaturan bahasa & preferensi\n\
@@ -2270,6 +2314,11 @@ Carik iku AI assistant sing bisa mbantu pandjenengan:\n\n\
 • /finance crypto - Harga crypto\n\
 • /finance currency - Kurs mata uang\n\
 • /finance stocks - Indeks saham\n\n\
+*🎮 Mini-Games*\n\
+• /scramble - Mulai dolanan scramble kata\n\
+• /hint - Dapet petunjuk (maks 2)\n\
+• /guess [katane] - Tebak jawaban\n\
+• /quit - Metu saka dolanan\n\n\
 *⚙️ Liyane*\n\
 • /workspace - Ngatur workspace\n\
 • /settings - Pengaturan basa\n\
@@ -2302,6 +2351,11 @@ Carik is an AI assistant that can help you with:\n\n\
 • /finance currency - Exchange rates\n\
 • /finance stocks - Stock indices\n\
 • \"how's bitcoin?\" - Natural language!\n\n\
+*🎮 Mini-Games*\n\
+• /scramble - Start a word scramble game\n\
+• /hint - Get a hint (max 2)\n\
+• /guess [word] - Guess the answer\n\
+• /quit - Quit the game\n\n\
 *⚙️ Other*\n\
 • /workspace - Manage workspaces\n\
 • /settings - Language & preferences\n\

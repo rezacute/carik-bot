@@ -66,6 +66,11 @@
 - [x] LLM summarization with URLs
 - [x] Natural language: "news about [country]"
 
+### ✅ Mini-Apps
+- [x] Mini-app plugin architecture
+- [x] Scramble game: /scramble, /hint, /guess, /quit
+- [x] User-scoped game state
+
 ---
 
 ## In Progress

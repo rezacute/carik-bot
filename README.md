@@ -39,6 +39,10 @@
 | `/workspace` | Manage workspaces | All |
 | `/rss [source]` | Fetch RSS news | Approved |
 | `/settings` | Your personal settings | All |
+| `/scramble` | Start a word scramble game | All |
+| `/hint` | Get a hint in the game | All |
+| `/guess [word]` | Guess the answer | All |
+| `/quit` | Quit the current game | All |
 
 ### Translate
 
@@ -48,6 +52,29 @@ The bot can translate messages using AI:
 - Example: Reply to any message with "translate to javanese"
 - Supported languages: English, Indonesian, Javanese, Spanish, Chinese, Japanese, Korean
 - Also works: "terjemahkan ke indonesia", "apa artinya hello"
+
+### Mini-Apps
+
+**Scramble Game** — Unscramble the letters to find the word!
+
+- `/scramble` — Start a new game
+- `/hint` — Get a hint (max 2 per game)
+- `/guess [word]` — Submit your guess
+- `/quit` — Quit the current game
+
+Example:
+```
+/scramble
+🎮 *Scramble Game!*
+Unscramble this word:
+*`TSUR`*
+
+/hint
+💡 Hint: Programming language
+
+/guess RUST
+🎉 Correct! The answer was RUST!
+```
 
 ### RSS News Sources
 
