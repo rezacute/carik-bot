@@ -2275,9 +2275,13 @@ Carik adalah asisten AI yang bisa membantu Anda dengan:\n\n\
 • \"harga bitcoin\" - Tanya natural\n\n\
 *🎮 Mini-Games*\n\
 • /scramble - Mulai permainan scrambel kata\n\
+• /scramble story - Mulai dengan mode cerita!\n\
 • /hint - Dapatkan petunjuk (maks 2)\n\
 • /guess [kata] - Tebak jawaban\n\
 • /quit - Keluar permainan\n\n\
+✨ *Fitur LLM:*\n\
+• Petunjuk kreatif (dibuat AI)\n\
+• Mode cerita (petualangan narasi)\n\n\
 *⚙️ Lainnya*\n\
 • /workspace - Kelola workspace\n\
 • /settings - Pengaturan bahasa & preferensi\n\
@@ -2316,9 +2320,13 @@ Carik iku AI assistant sing bisa mbantu pandjenengan:\n\n\
 • /finance stocks - Indeks saham\n\n\
 *🎮 Mini-Games*\n\
 • /scramble - Mulai dolanan scramble kata\n\
+• /scramble story - Mulai dengan mode cerita!\n\
 • /hint - Dapet petunjuk (maks 2)\n\
 • /guess [katane] - Tebak jawaban\n\
 • /quit - Metu saka dolanan\n\n\
+✨ *Fitur LLM:*\n\
+• Petunjuk kreatif (dibuat AI)\n\
+• Mode cerita (petualangan narasi)\n\n\
 *⚙️ Liyane*\n\
 • /workspace - Ngatur workspace\n\
 • /settings - Pengaturan basa\n\
@@ -2353,9 +2361,14 @@ Carik is an AI assistant that can help you with:\n\n\
 • \"how's bitcoin?\" - Natural language!\n\n\
 *🎮 Mini-Games*\n\
 • /scramble - Start a word scramble game\n\
+• /scramble story - Start with story mode!\n\
 • /hint - Get a hint (max 2)\n\
 • /guess [word] - Guess the answer\n\
 • /quit - Quit the game\n\n\
+✨ *LLM Features:*\n\
+• Creative hints (AI-generated)\n\
+• Story mode (narrative adventure)\n\
+• More words & themes coming soon!\n\n\
 *⚙️ Other*\n\
 • /workspace - Manage workspaces\n\
 • /settings - Language & preferences\n\

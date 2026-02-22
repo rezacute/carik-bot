@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::infrastructure::llm::{LLMMessage, LLM};
+
 /// Mini-app trait - implemented by each mini-app
 pub trait MiniApp: Send + Sync {
     /// App name
@@ -36,6 +38,12 @@ pub struct ScrambleState {
     pub scrambled: String,
     pub hints_used: u32,
     pub attempts: u32,
+    /// LLM-generated creative hint (if using LLM mode)
+    pub creative_hint: Option<String>,
+    /// Story mode narrative
+    pub story: Option<String>,
+    /// Word theme/category
+    pub theme: Option<String>,
 }
 
 /// Mini-app manager
@@ -134,6 +142,96 @@ impl ScrambleApp {
         }
         chars.iter().collect()
     }
+    
+    /// Generate a word via LLM (for LLM-enhanced mode)
+    pub fn generate_word_llm(&self) -> Option<(String, String, String)> {
+        // Try to use LLM to generate a word
+        // This would require passing the LLM instance, so for now return None
+        // In practice, this would be called from main.rs with the LLM provider
+        None
+    }
+    
+    /// Generate creative hint via LLM
+    pub fn generate_creative_hint_llm(word: &str, hint_num: u32, theme: Option<&str>) -> Option<String> {
+        let theme_hint = theme.map(|t| format!("Theme: {}. ", t)).unwrap_or_default();
+        
+        let prompt = if hint_num == 1 {
+            format!("{}Give a creative, fun hint for the word '{}' ({} letters). \
+Don't reveal the word! Be playful and indirect. Format: just the hint, nothing else.",
+                theme_hint, word, word.len())
+        } else {
+            format!("{}Give a second, more specific hint for the word '{}' ({} letters). \
+This is the second hint, so give more information but still don't reveal. Format: just the hint.",
+                theme_hint, word, word.len())
+        };
+        
+        // Use blocking call to get LLM response
+        // This requires the LLM to be passed in - placeholder for integration
+        tracing::debug!("Would generate creative hint via LLM: {}", prompt);
+        None
+    }
+    
+    /// Generate story mode narrative via LLM
+    pub fn generate_story_llm(word: &str, attempt: u32, correct: bool) -> Option<String> {
+        let prompt = if correct {
+            format!("Write a short, fun victory story (2-3 sentences) about guessing the word '{}'. \
+Make it celebratory and playful!", word)
+        } else if attempt == 1 {
+            format!("Write a short, mysterious intro story (2-3 sentences) about a hidden word '{}'. \
+Set the mood for a word guessing adventure!", word)
+        } else {
+            format!("Write a short story snippet (2-3 sentences) for someone trying to guess the word '{}'. \
+Be encouraging but mysterious!", word)
+        };
+        
+        tracing::debug!("Would generate story via LLM: {}", prompt);
+        None
+    }
+    
+    /// Generate creative hint (static fallback when LLM unavailable)
+    fn generate_creative_hint_static(word: &str, hint_num: u32) -> String {
+        let hints: Vec<(&str, &str, &str)> = vec![
+            ("RUST", "It's what old iron becomes, but also a modern programming language!", "Fear not the crash, this language is known for safety!"),
+            ("TELEGRAM", "Not the app, but the tool that changed warfare forever at the Somme.", "It was also a messaging app before there were smartphones!"),
+            ("PYTHON", "A snake? No, it's a popular programming language named after a comedy troupe!", "Used by NASA, Netflix, and Instagram!"),
+            ("ROBOT", "It comes from a word meaning 'forced labor' in Czech!", "Think Asimov, R2-D2, and ChatGPT's body!"),
+            ("NETWORK", "It's not just social - it's how computers talk to each other!", "The internet is the biggest one!"),
+            ("DATABASE", "Where your data goes to be organized - think Oracle or MySQL!", "ACID is its middle name!"),
+            ("ALGORITHM", "A recipe, but for computers! Named after a Persian mathematician.", "Google uses this to rank websites!"),
+            ("INTERFACE", "Where humans meet machines - touchscreens, buttons, or APIs!", "UI and UX are its cousins!"),
+            ("VARIABLE", "The 'X' in algebra that computers use to store secrets!", "Let, const, and var are its keywords!"),
+            ("FUNCTION", "A reusable code block that does one thing and does it well!", "main(), print(), and your custom functions!"),
+            ("KEYBOARD", "Not just for typing - QWERTY was designed to slow you down!", "It has 104 keys on a standard one!"),
+            ("MONITOR", "Your window into the digital world - CRT, LED, or OLED!", "144Hz means smooth motion!"),
+            ("SOFTWARE", "It's not hard - it's the programs that make hardware dance!", "Windows, macOS, and Linux are its families!"),
+            ("MEMORY", "Short-term or long-term - your computer has both!", "RAM is volatile, ROM is not!"),
+            ("BINARY", "The language of computers - just 0s and 1s!", "It's base-2, not base-10!"),
+            ("SERVER", "A computer that never sleeps, serving data day and night!", "The cloud is just someone else's server!"),
+        ];
+        
+        for (w, h1, h2) in hints {
+            if word.eq_ignore_ascii_case(w) {
+                return if hint_num == 1 { h1.to_string() } else { h2.to_string() };
+            }
+        }
+        // Default hints for unknown words
+        if hint_num == 1 {
+            format!("A {}-letter word related to tech!", word.len())
+        } else {
+            "Keep trying - it's a common computing term!".to_string()
+        }
+    }
+    
+    /// Generate story snippet (static fallback)
+    fn generate_static_story(word: &str, attempt: u32, correct: bool) -> String {
+        if correct {
+            format!("🎉 *Victory!* The word was *{}*! Your wits are sharp as a coder's! 🧠💻", word)
+        } else if attempt == 0 {
+            format!("📖 A mysterious word hides in the shadows... Can you uncover *{}*? The adventure begins! ✨", word.chars().map(|_| '?').collect::<String>())
+        } else {
+            format!("📖 The mystery deepens... You've tried {} time(s). The word *{}* awaits discovery! 🔍", attempt + 1, word.chars().map(|_| '?').collect::<String>())
+        }
+    }
 }
 
 impl MiniApp for ScrambleApp {
@@ -175,13 +273,26 @@ Unscramble the letters to find the word!\n\
                 scrambled: scrambled.clone(),
                 hints_used: 0,
                 attempts: 0,
+                creative_hint: None,
+                story: None,
+                theme: None,
             });
             
+            // Check for story mode
+            let story_msg = if lower.contains("story") {
+                let story = Self::generate_static_story(word, 0, false);
+                state.scramble.as_mut().unwrap().story = Some(story.clone());
+                format!("\n\n📖 *Story Mode:* {}", story)
+            } else {
+                String::new()
+            };
+            
             return Some(format!(
-                "🎮 *Scramble Game!*\n\n\
+                "🎮 *Scramble Game!*_{}\n\n\
 Unscramble this word:\n\
 *`{}`*\n\n\
 Reply with your guess or /hint for help.",
+                story_msg,
                 scrambled
             ));
         }
@@ -191,15 +302,20 @@ Reply with your guess or /hint for help.",
             // Hint
             if cmd.starts_with("hint") {
                 if game.hints_used < 2 {
+                    game.attempts += 1;
                     game.hints_used += 1;
                     let hint_idx = game.hints_used as usize;
                     let word = &game.word;
-                    let hint = self.words.iter()
-                        .find(|(w, _)| w == word)
-                        .map(|(_, h)| h)
-                        .unwrap_or(&"");
                     
-                    // Show hint based on letters revealed
+                    // Use creative hint if available (LLM mode), otherwise use static
+                    let hint = if let Some(ref creative) = game.creative_hint {
+                        creative.clone()
+                    } else {
+                        // Generate static creative hint
+                        Self::generate_creative_hint_static(word, game.hints_used)
+                    };
+                    
+                    // Show hint based on letters revealed (for non-LLM mode)
                     let revealed: String = word.chars()
                         .enumerate()
                         .map(|(i, c)| {
@@ -211,14 +327,26 @@ Reply with your guess or /hint for help.",
                         })
                         .collect();
                     
+                    // Add story if in story mode
+                    let story_msg = if let Some(ref story) = game.story {
+                        if game.hints_used == 1 {
+                            format!("\n\n📖 *Story continues:* {}", story)
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    
                     return Some(format!(
                         "💡 Hint {}: *{}*\n\n\
 Word: *{}*\n\n\
-Scrambled: `{}`",
+Scrambled: `{}`{}",
                         game.hints_used,
                         hint,
                         revealed,
-                        game.scrambled
+                        game.scrambled,
+                        story_msg
                     ));
                 } else {
                     return Some("❌ No more hints available!".to_string());
