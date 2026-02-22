@@ -62,8 +62,9 @@ impl MiniAppManager {
         tracing::debug!("MiniAppManager.handle called: text='{}', cmd='{}', apps={}", text, cmd, self.apps.len());
         
         // Check if user wants to start a mini-app or use game commands
-        if lower.contains("scramble") || cmd == "scramble" ||
-           cmd == "hint" || cmd == "guess" || cmd == "quit" {
+        // Use starts_with to handle commands with arguments like "/guess RUST"
+        if lower.contains("scramble") || cmd.starts_with("scramble") ||
+           cmd.starts_with("hint") || cmd.starts_with("guess") || cmd.starts_with("quit") {
             for app in &self.apps {
                 tracing::debug!("Delegating to app.handle for '{}'", app.name());
                 return app.handle(text, user_id, state);
@@ -155,8 +156,8 @@ Unscramble the letters to find the word!\n\
         
         tracing::debug!("ScrambleApp.handle: text='{}', cmd='{}', has_game={}", text, cmd, state.scramble.is_some());
         
-        // Handle hint/guess/quit even without active game
-        if cmd == "hint" || cmd == "guess" || cmd == "quit" {
+        // Handle hint/guess/quit even without active game - use starts_with for commands with args
+        if cmd.starts_with("hint") || cmd.starts_with("guess") || cmd.starts_with("quit") {
             if state.scramble.is_none() {
                 tracing::debug!("ScrambleApp.handle: no active game, returning 'No active game'");
                 return Some("🎮 No active game!\n\nUse /scramble to start a new game.".to_string());
@@ -164,7 +165,7 @@ Unscramble the letters to find the word!\n\
         }
         
         // Start new game
-        if cmd == "scramble" || lower.contains("play scramble") || lower.contains("main scramble") {
+        if cmd.starts_with("scramble") || lower.contains("play scramble") || lower.contains("main scramble") {
             let idx = rand_index(self.words.len());
             let (word, hint) = self.words[idx];
             let scrambled = Self::scramble_word(word);
@@ -188,7 +189,7 @@ Reply with your guess or /hint for help.",
         // Check if there's an active game
         if let Some(ref mut game) = state.scramble {
             // Hint
-            if cmd == "hint" {
+            if cmd.starts_with("hint") {
                 if game.hints_used < 2 {
                     game.hints_used += 1;
                     let hint_idx = game.hints_used as usize;
@@ -225,7 +226,7 @@ Scrambled: `{}`",
             }
             
             // Guess
-            if cmd == "guess" {
+            if cmd.starts_with("guess") {
                 let guess = text
                     .replace("/guess", "")
                     .replace("guess", "")
@@ -256,13 +257,13 @@ Scrambled: `{}`",
             }
             
             // Quit
-            if cmd == "quit" || lower.contains("quit game") {
+            if cmd.starts_with("quit") || lower.contains("quit game") {
                 state.scramble = None;
                 return Some("👋 Game ended. Thanks for playing!".to_string());
             }
             
             // Show current state
-            if cmd == "scramble" || lower == "status" {
+            if cmd.starts_with("scramble") || lower == "status" {
                 return Some(format!(
                     "📊 Game Status\n\n\
 Scrambled: *{}*\n\
